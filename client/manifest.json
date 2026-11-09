@@ -1,0 +1,9 @@
+{
+	"name": "Web Game Mother Hub",
+	"short_name": "Mother Hub",
+	"start_url": "/",
+	"display": "standalone",
+	"background_color": "#1d1d1d",
+	"theme_color": "#7a34b2",
+	"icons": [{ "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
