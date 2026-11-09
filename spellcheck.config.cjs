@@ -10,7 +10,7 @@ module.exports = {
 		'lan',
 		'loopback',
 		'minmax',
-		'paude',
+		'paude', 'subarray',
 		'it’s',
 		'pids',
 		'sys',

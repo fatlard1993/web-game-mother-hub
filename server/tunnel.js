@@ -1,11 +1,13 @@
 #!/usr/bin/env bun
 
-// One exposed game's way out: an SSH reverse tunnel from this machine to the VPS, run as its own systemd unit, which
-// starts it again whenever the connection drops. The VPS end listens on its own loopback only; Caddy there is what
-// faces the internet and hands each public port to its tunnel (dotfiles' profiles/vps/dot-update.d/caddy). The key it
-// uses is one of its own, which the VPS lets forward those ports and do nothing else.
+// One exposed game's way out, run as its own systemd unit, which starts it again whenever it drops: from the htpc, an
+// ssh reverse tunnel to the VPS, with a key of its own the VPS lets forward those ports and do nothing else; on the
+// VPS itself (--host local), a relay on its loopback. Either way, Caddy there faces the internet and hands each public
+// port to its tunnel (dotfiles' profiles/vps/dot-update.d/caddy).
 
 import Argi from 'argi-cli';
+
+import { relay } from './relay';
 
 const { options } = new Argi({
 	options: {
@@ -21,33 +23,8 @@ if (!options.host || !options.remote || !options.local) {
 	process.exit(2);
 }
 
-// The hub on the VPS itself (paude's own copy there) needs no ssh: the tunnel's loopback port is forwarded here, byte
-// for byte, to the game's
 if (options.host === 'local') {
-	Bun.listen({
-		hostname: '127.0.0.1',
-		port: options.remote,
-		socket: {
-			open: async client => {
-				client.data = { pending: [] };
-				client.data.game = await Bun.connect({
-					hostname: '127.0.0.1',
-					port: options.local,
-					socket: {
-						data: (_, chunk) => client.write(chunk),
-						close: () => client.end(),
-						error: () => client.end(),
-					},
-				}).catch(() => client.end());
-
-				for (const chunk of client.data.pending) client.data.game?.write(chunk);
-				client.data.pending = null;
-			},
-			data: (client, chunk) => (client.data.pending ? client.data.pending.push(chunk) : client.data.game?.write(chunk)),
-			close: client => client.data?.game?.end(),
-			error: client => client.data?.game?.end(),
-		},
-	});
+	relay({ listenPort: options.remote, targetPort: options.local });
 
 	console.log(`Forwarding 127.0.0.1:${options.remote} to the game on :${options.local}`);
 } else {
