@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { readFileSync, statSync } from 'fs';
+import { existsSync, readFileSync, statSync } from 'fs';
 import os from 'os';
 import path from 'path';
 
@@ -44,6 +44,11 @@ const { options } = new Argi({
 			type: 'string',
 			defaultValue: env.MOTHER_HUB_PUBLIC_HOST,
 			description: "The VPS's public address, as players will type it",
+		},
+		'vps-key': {
+			type: 'string',
+			defaultValue: env.MOTHER_HUB_VPS_KEY || path.join(os.homedir(), '.ssh', 'mother-hub-tunnel'),
+			description: 'The key the tunnels reach the VPS with (dotfiles makes one, the VPS lets it forward and no more)',
 		},
 		'lan-names': {
 			type: 'string',
@@ -119,6 +124,8 @@ const hub = createHub({
 		publicPortBase: options['public-port-base'],
 		tunnelPortBase: options['tunnel-port-base'],
 		slots: options.slots,
+		// Used when it's there; without it ssh offers whatever keys it has
+		identity: existsSync(options['vps-key']) ? options['vps-key'] : null,
 	},
 });
 

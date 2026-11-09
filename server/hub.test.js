@@ -285,6 +285,17 @@ describe('exposing', () => {
 		expect((await hub.get(id)).exposeSlot).toBe(1);
 	});
 
+	test('a tunnel reaches the VPS with the hub its own key, when it has one', async () => {
+		const { hub, units } = setup({ exposure: { sshHost: 'ubuntu@203.0.113.7', identity: '/k/mother-hub-tunnel' } });
+		const { id } = await hub.add({ dir: await makeGame('app') });
+
+		await hub.expose(id).done;
+
+		expect(units.units.get('mother-hub-tunnel-app').definition.args).toEqual(
+			expect.arrayContaining(['--host', 'ubuntu@203.0.113.7', '--identity', '/k/mother-hub-tunnel']),
+		);
+	});
+
 	test('runs out of slots plainly', async () => {
 		const { hub } = setup({ exposure: { slots: 1 } });
 		const one = await hub.add({ dir: await makeGame('one') });

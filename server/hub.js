@@ -264,7 +264,15 @@ export const createHub = ({
 				description: `${record.name} exposed on the VPS at :${ports.public} (web-game-mother-hub)`,
 				cwd: hubDir,
 				entry: 'server/tunnel.js',
-				args: ['--host', exposure.sshHost, '--remote', String(ports.remote), '--local', String(record.port)],
+				args: [
+					'--host',
+					exposure.sshHost,
+					'--remote',
+					String(ports.remote),
+					'--local',
+					String(record.port),
+					...(exposure.identity ? ['--identity', exposure.identity] : []),
+				],
 			},
 			log,
 		);
