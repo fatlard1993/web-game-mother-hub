@@ -28,7 +28,7 @@ export const settingsDialog = (game, onChanged) =>
 	new FormDialog({
 		header: game.name,
 		inputs: [
-			{ key: 'name', label: 'Name' },
+			{ key: 'name', label: "Name (empty to use the game's own)" },
 			{ key: 'port', label: 'Port', type: 'number' },
 			{ key: 'databases', label: 'Save files (one per line; a reset moves these aside)', type: 'textarea' },
 		],

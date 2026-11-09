@@ -8,11 +8,15 @@ import '@vanilla-bean/components/app/reloadOnBuild';
 const page = new Page({ appendTo: document.body });
 
 // Anyone on the LAN finds and plays the games; logging in (the corner button) makes this page the admin's, to run them
+let hub;
+
 const show = async () => {
 	const admin = await getSession().catch(() => false);
 
+	// The view it replaces stops polling with it
+	hub?.destroy();
 	page.empty();
-	new Hub({ appendTo: page, admin, onSessionChanged: show });
+	hub = new Hub({ appendTo: page, admin, onSessionChanged: show });
 };
 
 show();

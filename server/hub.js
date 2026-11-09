@@ -748,20 +748,29 @@ export const createHub = ({
 
 				for (const file of linked) log(`${file} is a link to a file kept elsewhere; leaving it`);
 
+				// Nothing to move, nothing to stop the game for
+				if (saves.length === 0) {
+					log(
+						linked.length > 0
+							? 'Its only saves are kept elsewhere; nothing moved'
+							: 'No save file yet; nothing to move',
+					);
+
+					return;
+				}
+
 				const wasActive = (await units.state(gameUnit(id))).active;
 
 				if (wasActive) await units.stop(gameUnit(id));
 
 				const aside = path.join(resetsDir, id, now().toISOString().replace(/[:.]/g, '-'));
 
-				if (saves.length > 0) {
-					await mkdir(aside, { recursive: true });
+				await mkdir(aside, { recursive: true });
 
-					for (const file of saves) {
-						await rename(file, path.join(aside, path.basename(file)));
-						log(`Moved ${file} to ${aside}`);
-					}
-				} else log('No save file yet; nothing to move');
+				for (const file of saves) {
+					await rename(file, path.join(aside, path.basename(file)));
+					log(`Moved ${file} to ${aside}`);
+				}
 
 				if (wasActive) await startGame(record, log);
 

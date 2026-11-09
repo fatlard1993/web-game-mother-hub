@@ -10,6 +10,11 @@ const POLL_MS = 3000;
 const BUSY_POLL_MS = 1000;
 
 const Grid = styled.Component`
+	&.stale {
+		opacity: 0.45;
+		filter: grayscale(0.7);
+	}
+
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
 	gap: 12px;
@@ -86,7 +91,14 @@ export default class Hub extends Component {
 			style: { display: 'none' },
 		});
 
-		new Content({ appendTo: this, column: 1200, append: [this.empty, this.grid] });
+		this.offline = new EmptyState({
+			icon: 'plug-circle-xmark',
+			heading: "Can't reach the hub right now",
+			body: 'The games may still be running. This page tries again every few seconds.',
+			style: { display: 'none' },
+		});
+
+		new Content({ appendTo: this, column: 1200, append: [this.offline, this.empty, this.grid] });
 
 		Object.assign(this.elem.style, { display: 'flex', flexDirection: 'column', height: '100%' });
 
@@ -102,27 +114,44 @@ export default class Hub extends Component {
 	async refresh() {
 		clearTimeout(this.timer);
 
+		// A page that's been replaced (logged in or out) stops; a hidden tab waits to be looked at again
+		if (this.stopped) return;
+		if (document.hidden) {
+			document.addEventListener('visibilitychange', () => this.refresh(), { once: true });
+
+			return;
+		}
+
 		let games = null;
 
 		try {
 			const response = await getGames();
 
-			// A session that ran out mid-visit: the page goes back to the player's view
-			if (response.status === 401 && this.options.admin) return this.options.onSessionChanged?.();
+			if (response.status === 401 && this.options.admin) {
+				new Notify({ intent: 'warning', content: 'Your admin login ran out: log in again to run the games' });
+
+				return this.options.onSessionChanged?.();
+			}
 
 			games = response.ok ? await response.json() : null;
 		} catch {
-			// The hub restarting: the next poll finds it
+			// The hub restarting, or the network gone: said below, and the next poll finds it again
 		}
 
+		this.offline.elem.style.display = games ? 'none' : '';
+		this.grid.elem.classList.toggle('stale', !games);
 		if (games) this.show(games);
-
-		if (!this.elem.isConnected && this.shown) return;
 
 		this.timer = setTimeout(
 			() => this.refresh(),
 			games?.some(game => game.operation?.running) ? BUSY_POLL_MS : POLL_MS,
 		);
+	}
+
+	destroy() {
+		this.stopped = true;
+		clearTimeout(this.timer);
+		super.destroy();
 	}
 
 	show(games) {
@@ -135,8 +164,9 @@ export default class Hub extends Component {
 		for (const game of games) {
 			seen.add(game.id);
 
-			// A card is rebuilt only when what it shows changed, so a press never lands on a card being replaced for nothing
-			const signature = JSON.stringify({ ...game, report: undefined });
+			// A card is rebuilt only when what it shows changed, or once a minute so its "started 5m ago" and "Starting…"
+			// move on; a press rarely lands on a card being replaced for nothing
+			const signature = JSON.stringify({ ...game, report: undefined, minute: Math.floor(Date.now() / 60_000) });
 			const current = this.cards.get(game.id);
 
 			if (current?.signature === signature) {

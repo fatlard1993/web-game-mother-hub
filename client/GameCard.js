@@ -233,6 +233,15 @@ const StyledCard = styled(
 	`,
 );
 
+// The address to send someone for a game night, or, where the browser won't copy (a page not over https), the address
+// said out loud to copy by hand
+const copyAddress = url =>
+	navigator.clipboard
+		?.writeText(url)
+		.then(() => new Notify({ intent: 'success', content: `Copied ${url}` }))
+		.catch(() => new Notify({ intent: 'warning', content: `Couldn't copy it here; the address is ${url}` })) ??
+	new Notify({ intent: 'warning', content: `Couldn't copy it here; the address is ${url}` });
+
 const light = key => new Elem({ addClass: ['light', LIGHTS[key]].filter(Boolean) });
 
 const ago = stamp => {
@@ -364,17 +373,17 @@ export default class GameCard extends StyledCard {
 							intent: 'success',
 							onPointerPress: () => window.open(lanUrl, '_blank'),
 						}),
-					game.exposed &&
+					// Only while it really is open: a failing tunnel's address only says the game isn't open
+					open.key === 'open' &&
+						game.publicUrl &&
+						new Elem({ tag: 'a', href: game.publicUrl, target: '_blank', textContent: game.publicUrl }),
+					open.key === 'open' &&
 						game.publicUrl &&
 						new Button({
 							icon: 'copy',
 							variant: 'flat',
-							textContent: 'Copy its internet address',
-							tooltip: game.publicUrl,
-							onPointerPress: () =>
-								navigator.clipboard
-									.writeText(game.publicUrl)
-									.then(() => new Notify({ intent: 'success', content: `Copied ${game.publicUrl}` })),
+							tooltip: 'Copy the address to send',
+							onPointerPress: () => copyAddress(game.publicUrl),
 						}),
 					(about.hasReadme || about.pictures > 0) &&
 						new Button({ icon: 'book-open', variant: 'flat', textContent: 'About', onPointerPress: openAbout }),
@@ -454,10 +463,7 @@ export default class GameCard extends StyledCard {
 				icon: 'copy',
 				variant: 'flat',
 				tooltip: 'Copy the address',
-				onPointerPress: () =>
-					navigator.clipboard
-						.writeText(game.publicUrl)
-						.then(() => new Notify({ intent: 'success', content: 'Copied' })),
+				onPointerPress: () => copyAddress(game.publicUrl),
 			});
 		}
 
@@ -515,7 +521,22 @@ export default class GameCard extends StyledCard {
 							icon: 'power-off',
 							textContent: 'Turn off',
 							disabled: busy,
-							onPointerPress: () => this.act('turnOff'),
+							// Asked first only when it would put someone out: players on it, or guests coming in from outside
+							onPointerPress: () =>
+								this.act('turnOff', {
+									confirm: (game.report?.connections > 0 || game.exposed) && {
+										header: `Turn ${game.name} off?`,
+										body: [
+											game.report?.connections > 0 &&
+												`${game.report.connections} ${game.report.connections === 1 ? 'person has' : 'people have'} it open right now.`,
+											game.exposed && "It's open to the internet, and closes with it.",
+										]
+											.filter(Boolean)
+											.join(' '),
+										confirmLabel: 'Turn it off',
+										intent: 'warning',
+									},
+								}),
 						})
 					: new Button({
 							icon: 'power-off',
@@ -532,22 +553,24 @@ export default class GameCard extends StyledCard {
 						disabled: busy,
 						onPointerPress: () => this.act('restart'),
 					}),
-				new Button({
-					icon: 'eraser',
-					variant: 'flat',
-					tooltip: 'Reset: start over with no saves',
-					intent: 'danger',
-					disabled: busy,
-					onPointerPress: () =>
-						this.act('reset', {
-							confirm: {
-								header: `Reset ${game.name}?`,
-								body: 'Every game and player saved in it is cleared. The old save files are moved aside, not deleted.',
-								confirmLabel: 'Reset',
-								intent: 'danger',
-							},
-						}),
-				}),
+				// Offered only to a game with saves to clear; the confirm says where they go, which is also how it's undone
+				game.databases?.length > 0 &&
+					new Button({
+						icon: 'eraser',
+						variant: 'flat',
+						tooltip: 'Reset: start over with no saves',
+						intent: 'danger',
+						disabled: busy,
+						onPointerPress: () =>
+							this.act('reset', {
+								confirm: {
+									header: `Reset ${game.name}?`,
+									body: `Its saved games and players are cleared. The save files are moved, not deleted, to ~/.web-game-mother-hub-resets/${game.id}/ on the hub's machine: move them back to undo it.`,
+									confirmLabel: 'Reset',
+									intent: 'danger',
+								},
+							}),
+					}),
 				(about.hasReadme || about.pictures > 0) &&
 					new Button({ icon: 'book-open', variant: 'flat', tooltip: 'About', onPointerPress: openAbout }),
 				new Button({
