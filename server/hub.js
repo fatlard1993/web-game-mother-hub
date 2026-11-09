@@ -51,6 +51,8 @@ export const createHub = ({
 	exposure,
 	now = () => new Date(),
 	startWaitMs = START_WAIT_MS,
+	// The hub's own: under bun-server@, PATH doesn't know ~/.bun/bin
+	bun = process.execPath,
 }) => {
 	const games = () => db.data.games;
 	// Games forgotten here, which looking through the units mustn't bring back
@@ -410,8 +412,8 @@ export const createHub = ({
 				// and the dirty file stops every pull after
 				const locked = ['bun.lock', 'bun.lockb'].some(file => existsSync(path.join(record.dir, file)));
 
-				await step(log, ['bun', 'install', ...(locked ? ['--frozen-lockfile'] : [])], record.dir);
-				if (record.hasBuild) await step(log, ['bun', 'run', 'build'], record.dir);
+				await step(log, [bun, 'install', ...(locked ? ['--frozen-lockfile'] : [])], record.dir);
+				if (record.hasBuild) await step(log, [bun, 'run', 'build'], record.dir);
 
 				if ((await units.state(gameUnit(id))).active) {
 					log('Restarting');

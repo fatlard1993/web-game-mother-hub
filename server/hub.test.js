@@ -89,6 +89,7 @@ const setup = ({ run = async () => ({ code: 0, output: '' }), exposure = {}, sho
 		projectsRoot: root,
 		selfId: 'web-game-mother-hub',
 		hubDir: '/hub',
+		bun: 'bun',
 		resetsDir: path.join(root, 'resets'),
 		exposure: {
 			sshHost: 'vps',
