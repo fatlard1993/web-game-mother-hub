@@ -18,6 +18,8 @@ The hub lives on the htpc beside the games, and [dotfiles](https://github.com/fa
 | `MOTHER_HUB_TOKEN` |  |  | what paude hosts games with, as a bearer token |
 | `MOTHER_HUB_LAN_NAMES_DIR` |  |  | where a hosted game's `name=port` goes, to be named |
 | `MOTHER_HUB_LAN_NAMES_REFRESH` |  |  | the command that makes those names |
+| `MOTHER_HUB_PUBLIC_PORT_BASE` | `--public-port-base` | `9100` | exposed games are on the ports after it |
+| `MOTHER_HUB_TUNNEL_PORT_BASE` | `--tunnel-port-base` | `19100` | their tunnels listen on the VPS's loopback after it |
 | `MOTHER_HUB_UPDATE_AT` | `--update-at` | `04:00` | when, each night, the games set to update themselves are |
 |  | `--database` | `~/.web-game-mother-hub.json` | the games and their settings |
 |  | `--projects` | `~/Projects` | where the games are, as `bun-server@` runs them |

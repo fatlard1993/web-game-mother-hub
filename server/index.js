@@ -55,10 +55,14 @@ const { options } = new Argi({
 			defaultValue: env.MOTHER_HUB_LAN_NAMES || path.join(os.homedir(), '.config', 'lan-names.urls'),
 			description: "Each service's address on the LAN, a `port url` line apiece (dotfiles' lan-names writes it)",
 		},
-		'public-port-base': { type: 'number', defaultValue: 9100, description: 'Exposed games get the ports after this' },
+		'public-port-base': {
+			type: 'number',
+			defaultValue: Number(env.MOTHER_HUB_PUBLIC_PORT_BASE) || 9100,
+			description: 'Exposed games get the ports after this',
+		},
 		'tunnel-port-base': {
 			type: 'number',
-			defaultValue: 19100,
+			defaultValue: Number(env.MOTHER_HUB_TUNNEL_PORT_BASE) || 19100,
 			description: "Tunnels listen on the VPS's loopback at the ports after this",
 		},
 		'update-at': {
