@@ -62,6 +62,8 @@ paude's arcade hosts its games here: wired to a hub (its `arcade.hub`, a URL and
 - `POST /api/host` with `{ name, dir, head }`. When the hub sees the game's repo in its projects folder at that commit (paude on the same machine), it hosts it there. Otherwise it answers `{ needsBundle: true }`.
 - `POST /api/host/<name>/bundle` with the repo as a git bundle (`git bundle create - HEAD --branches`) for the body. The first time it's cloned into the projects folder; after that, each new bundle is brought forward on top (fast-forward only). That way a game built in a local repo, with no remote to pull from, can be hosted from any machine.
 
+paude does this on its own: when a game is made, about ten minutes after each spell of building on it, and for any arcade game not hosted yet when paude starts. Its hosting asks the hub to wait for an idle game (`whenIdle`): a game with players connected gets its new code but not the rebuild and restart, which wait for the night's round once they've gone.
+
 Hosting installs and builds the game, starts it (or restarts it), and, on a machine that names its services, gives it its LAN name: a `name=port` file in `MOTHER_HUB_LAN_NAMES_DIR`, then `MOTHER_HUB_LAN_NAMES_REFRESH` run to make it a name (on the htpc, dotfiles' `lan-names`). Hosting the same game again brings it up to date. The request takes `Authorization: Bearer <MOTHER_HUB_TOKEN>`, a shared secret, so keep it as close as the password.
 
 On a machine without dotfiles' `bun-server@` template unit, the hub installs its own, of the same shape, the first time it starts a game.
