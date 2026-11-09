@@ -80,6 +80,15 @@ export const createRouter = ({ hub, auth, projectsRoot }) => {
 			return new Response(null, { status: 204 });
 		}
 
+		if ((match = requestMatch('GET', '/api/games/:id/icon', request))) {
+			const file = await hub.icon(match.id);
+
+			if (!file) return Response.json({ error: 'No icon' }, { status: 404 });
+
+			// The URL carries the icon's version, so a new icon is a new URL and this one can be kept
+			return new Response(Bun.file(file), { headers: { 'cache-control': 'private, max-age=86400' } });
+		}
+
 		if ((match = requestMatch('GET', '/api/games/:id/logs', request))) {
 			const lines = Math.min(Number(new URL(request.url).searchParams.get('lines')) || 200, 2000);
 

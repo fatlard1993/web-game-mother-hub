@@ -5,6 +5,7 @@ import path from 'path';
 import { ValidationError } from '@vanilla-bean/components/app';
 
 import { detectGame } from './detect';
+import { readLook } from './look';
 import { tunnelUnit } from './units';
 
 // Ports handed to games that don't come with one of their own (the scaffold's games). Kept clear of paude's arcade
@@ -13,6 +14,8 @@ const ASSIGNED_PORTS = [4100, 4199];
 const GIT_CACHE_MS = 30_000;
 const HEALTH_TIMEOUT_MS = 1500;
 const OPERATION_LINES = 400;
+// What web-game-framework's Server answers with its status (its STATUS_PATH)
+const STATUS_PATH = '/.well-known/web-game';
 
 class BusyError extends Error {
 	status = 409;
@@ -146,20 +149,29 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 	};
 
 	const status = async record => {
-		const [unit, tunnel, health, git] = await Promise.all([
+		const [unit, tunnel, answer, git, look] = await Promise.all([
 			units.state(record.id),
 			record.exposeSlot ? units.state(tunnelUnit(record.id)) : null,
-			probe(`http://127.0.0.1:${record.port}/`, HEALTH_TIMEOUT_MS),
+			// Any answer at all means it's up; a game on the framework answers with how it's doing besides
+			probe(`http://127.0.0.1:${record.port}${STATUS_PATH}`, HEALTH_TIMEOUT_MS),
 			gitInfo(record),
+			readLook(record),
 		]);
 		const operation = operations.get(record.id);
 
 		return {
 			...record,
+			// The game's own name, from its manifest, follows it as it changes, until it's renamed here
+			name: record.renamed ? record.name : (look.title ?? record.name),
 			unit,
 			tunnel,
-			health,
+			health: { ok: answer.ok },
+			report: unit.active ? answer.report : null,
 			git,
+			look: {
+				...look,
+				icon: look.icon ? `/api/games/${encodeURIComponent(record.id)}/icon?v=${look.iconVersion}` : null,
+			},
 			publicUrl: record.exposed ? publicUrl(record) : null,
 			operation: operation && { ...operation, lines: operation.lines.slice(-60) },
 		};
@@ -200,8 +212,11 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 
 		add: async ({ dir, ...overrides }) => {
 			const detected = await detectGame(dir);
+			const { title } = await readLook(detected);
 			const record = {
 				...detected,
+				// The name the game gives itself, in its manifest or page title, over one made from its folder
+				name: title ?? detected.name,
 				...pick(overrides, ['name', 'port', 'databases']),
 				exposed: false,
 				exposeSlot: null,
@@ -234,7 +249,9 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 
 			const portChanged = next.port !== record.port;
 
-			games()[id] = { ...next, name: next.name.trim() };
+			const renamed = record.renamed || next.name.trim() !== (await readLook(record)).title;
+
+			games()[id] = { ...next, name: next.name.trim(), renamed };
 			await db.write();
 
 			// The running unit still has the old port in it; a fresh start writes the new one
@@ -367,6 +384,8 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 		},
 
 		// The tunnel's lines follow the game's, for an exposed game: that's where the VPS says why it refused
+		icon: async id => (await readLook(game(id))).icon,
+
 		logs: async (id, lines) => {
 			const record = game(id);
 			const logs = await units.logs(id, lines);

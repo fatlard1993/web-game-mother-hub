@@ -1,7 +1,7 @@
 import { Button, Card, Component, Dialog, Elem, Notify, styled } from '@vanilla-bean/components';
 
 import { failure, gameAction } from './api';
-import { capitalize, exposureState, gameState } from './gameState';
+import { capitalize, exposureState, gameState, reportChips } from './gameState';
 
 const LIGHTS = {
 	up: 'success',
@@ -20,22 +20,128 @@ const LIGHTS = {
 const StyledCard = styled(
 	Card,
 	({ colors, space }) => `
+		/* --game-color is set per card, from the game's own manifest */
 		display: flex;
 		flex-direction: column;
 		gap: ${space.sm};
+		border-top: 3px solid var(--game-color);
+		background-image: linear-gradient(
+			165deg,
+			color-mix(in srgb, var(--game-color) 24%, transparent),
+			transparent 55%
+		);
+		transition: filter 0.3s;
+
+		&.off {
+			background-image: linear-gradient(
+				165deg,
+				color-mix(in srgb, var(--game-color) 8%, transparent),
+				transparent 55%
+			);
+		}
+
+		&.off .tile {
+			filter: grayscale(0.6) brightness(0.8);
+		}
 
 		.title {
 			display: flex;
 			align-items: center;
 			gap: ${space.sm};
-			font-weight: bold;
-			font-size: 1.1em;
+		}
+
+		.title .name {
+			display: flex;
+			flex-direction: column;
+			min-width: 0;
+		}
+
+		.title .name strong {
+			font-size: 1.15em;
+			overflow: hidden;
+			text-overflow: ellipsis;
+			white-space: nowrap;
 		}
 
 		.title a {
 			margin-left: auto;
-			font-weight: normal;
+			align-self: flex-start;
 			font-size: 0.85em;
+		}
+
+		.tile {
+			position: relative;
+			flex: none;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			width: 52px;
+			height: 52px;
+			border-radius: 12px;
+			background: var(--game-color);
+			box-shadow: 0 2px 10px color-mix(in srgb, var(--game-color) 45%, transparent);
+			font-size: 1.6em;
+			font-weight: bold;
+			color: ${colors.white};
+			text-shadow: 0 1px 2px ${colors.alpha(colors.vantablack, 0.6)};
+			transition: filter 0.3s;
+		}
+
+		.tile img {
+			width: 70%;
+			height: 70%;
+			object-fit: contain;
+			image-rendering: pixelated;
+		}
+
+		.tile .light {
+			position: absolute;
+			right: -4px;
+			bottom: -4px;
+			width: 14px;
+			height: 14px;
+			border: 2px solid ${colors.surface};
+		}
+
+		.metrics {
+			display: flex;
+			flex-wrap: wrap;
+			gap: ${space.xs};
+		}
+
+		.metrics:empty {
+			display: none;
+		}
+
+		.chip {
+			display: inline-flex;
+			align-items: baseline;
+			gap: 0.35em;
+			padding: 2px 8px;
+			border-radius: 999px;
+			background: ${colors.alpha(colors.white, 0.06)};
+			font-size: 0.85em;
+		}
+
+		.chip b {
+			font-variant-numeric: tabular-nums;
+		}
+
+		.chip span {
+			color: ${colors.muted};
+		}
+
+		.chip.lead {
+			background: color-mix(in srgb, var(--game-color) 30%, transparent);
+		}
+
+		.chip.lead span {
+			color: inherit;
+		}
+
+		.chip.quiet {
+			background: none;
+			padding-inline: 0;
 		}
 
 		.row {
@@ -108,6 +214,22 @@ export default class GameCard extends StyledCard {
 		onChanged?.();
 	}
 
+	// Live numbers change every poll; they're redrawn here alone, not the whole card under a pointer about to press it
+	showReport(report) {
+		this.metrics.elem.replaceChildren(
+			...reportChips(report).map(
+				chip =>
+					new Elem({
+						addClass: ['chip', chip.lead && 'lead', chip.quiet && 'quiet'].filter(Boolean),
+						append: [
+							new Elem({ tag: 'b', textContent: chip.value }),
+							new Elem({ tag: 'span', textContent: chip.label }),
+						],
+					}).elem,
+			),
+		);
+	}
+
 	build() {
 		const { game, exposure } = this.options;
 		const state = gameState(game);
@@ -116,21 +238,35 @@ export default class GameCard extends StyledCard {
 		const on = game.unit.active || game.unit.state === 'auto-restart';
 		const lanUrl = `http://${location.hostname}:${game.port}`;
 
+		this.elem.style.setProperty('--game-color', game.look.color);
+		if (!on) this.addClass('off');
+
 		new Component({
 			appendTo: this,
 			addClass: 'title',
 			append: [
-				light(state.key),
-				new Elem({ tag: 'span', textContent: game.name }),
+				new Elem({
+					addClass: 'tile',
+					append: [
+						game.look.icon
+							? new Elem({ tag: 'img', src: game.look.icon, alt: '' })
+							: new Elem({ tag: 'span', textContent: [...game.name][0]?.toUpperCase() ?? '?' }),
+						light(state.key),
+					],
+				}),
+				new Elem({
+					addClass: 'name',
+					append: [
+						new Elem({ tag: 'strong', textContent: game.name, title: game.name }),
+						new Elem({ tag: 'span', textContent: state.label }),
+					],
+				}),
 				game.unit.active && new Elem({ tag: 'a', href: lanUrl, target: '_blank', textContent: `:${game.port}` }),
 			].filter(Boolean),
 		});
 
-		new Component({
-			appendTo: this,
-			addClass: 'row',
-			append: [new Elem({ tag: 'span', textContent: state.label })],
-		});
+		this.metrics = new Elem({ appendTo: this, addClass: 'metrics' });
+		this.showReport(game.report);
 
 		if (game.git) {
 			const { branch, commit, age, subject, dirty, behind } = game.git;

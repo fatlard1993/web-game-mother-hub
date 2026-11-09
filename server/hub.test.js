@@ -348,6 +348,24 @@ test('forgetting a game never started touches no unit of its name', async () => 
 	expect(units.calls).toEqual([['remove', 'mother-hub-tunnel-app']]);
 });
 
+test("a game's card follows the name in its manifest, until it's renamed in the hub", async () => {
+	const { hub } = setup();
+	const dir = await makeGame('dino');
+	const manifest = name => writeFile(path.join(dir, 'client/manifest.json'), JSON.stringify({ name }));
+
+	await mkdir(path.join(dir, 'client'));
+	await manifest('Dino Dash');
+
+	const { id } = await hub.add({ dir });
+
+	await manifest('Dino Dash 2');
+	expect((await hub.get(id)).name).toBe('Dino Dash 2');
+
+	await hub.edit(id, { name: 'Sunday Dinos' });
+	await manifest('Dino Dash 3');
+	expect((await hub.get(id)).name).toBe('Sunday Dinos');
+});
+
 describe('finding games', () => {
 	test("a house app with no db:clean still has its save file found in its server's default", async () => {
 		const dir = await makeGame('humanity');

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { exposureState, gameState } from './gameState';
+import { exposureState, gameState, reportChips } from './gameState';
 
 const NOW = Date.parse('2026-11-08T20:00:00Z');
 const unit = (overrides = {}) => ({
@@ -58,5 +58,31 @@ describe('exposureState', () => {
 		const game = { exposed: true, unit: unit(), tunnel: { active: false, restarts: 5 } };
 
 		expect(exposureState(game).key).toBe('failing');
+	});
+});
+
+describe('reportChips', () => {
+	test("who's here leads, then the games going, the game's own numbers, and memory last", () => {
+		const report = {
+			connections: 3,
+			games: 1,
+			players: 4,
+			memory: 52 * 1048576,
+			metrics: [{ label: 'deepest dig', value: 42 }],
+		};
+
+		expect(reportChips(report)).toEqual([
+			{ value: 3, label: 'here now', lead: true },
+			{ value: '4 players', label: 'in 1 game' },
+			{ value: '42', label: 'deepest dig' },
+			{ value: '52 MB', label: 'memory', quiet: true },
+		]);
+	});
+
+	test('no games going says nothing of players; no report shows nothing', () => {
+		expect(reportChips({ connections: 0, games: 0, players: 0 })).toEqual([
+			{ value: 0, label: 'here now', lead: true },
+		]);
+		expect(reportChips(null)).toEqual([]);
 	});
 });

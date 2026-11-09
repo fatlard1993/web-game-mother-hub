@@ -112,10 +112,13 @@ export default class Hub extends Component {
 			seen.add(game.id);
 
 			// A card is rebuilt only when what it shows changed, so a press never lands on a card being replaced for nothing
-			const signature = JSON.stringify(game);
+			const signature = JSON.stringify({ ...game, report: undefined });
 			const current = this.cards.get(game.id);
 
-			if (current?.signature === signature) continue;
+			if (current?.signature === signature) {
+				current.card.showReport(game.report);
+				continue;
+			}
 
 			const card = new GameCard({
 				game,

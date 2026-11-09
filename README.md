@@ -52,6 +52,13 @@ Each game runs as a systemd user unit named for the game: the same unit its own 
 
 The light by each name says whether it's running and answering on its port, starting, crashing (with how many restarts), or running without answering.
 
+## How a game shows on its card
+
+A game says how it looks and how it's doing itself; the hub only reads it.
+
+- **Its look** comes from its web manifest (`client/manifest.json`), as a browser reads it: `name` for the card's title, `theme_color` for the card's color, and the biggest of its `icons` for the tile. Failing those, the page's `<title>`, `<meta name="theme-color">` and icon link. A game with no color of its own gets a steady one made from its name. The title follows the manifest as it changes, unless the game is renamed in its settings here.
+- **Its numbers** come from `GET /.well-known/web-game`, which every game on [web-game-framework](https://github.com/fatlard1993/web-game-framework) answers: how many have it open right now, the games going and the players in them, and its memory. A game adds numbers of its own with the Server's `status` option, `server => [{ label: 'deepest dig', value: 42 }]`, and they show on its card as they are. A game that doesn't answer it still gets its light, from any answer on its port.
+
 ## Opening a game to the internet
 
 Each exposed game gets a slot, and keeps it, so its address is the same every game night: slot 1 is `https://<public-host>:9101`, and so on. **Open to the internet** starts an SSH reverse tunnel from the htpc to `127.0.0.1:1910N` on the VPS, as a systemd unit of its own that reconnects when the connection drops. **Close**, turning the game off, or **Close everything to the internet** in the toolbar takes it down.

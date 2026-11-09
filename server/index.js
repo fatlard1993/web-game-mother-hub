@@ -51,8 +51,9 @@ const auth = await createAuth({ db, password: options.password || process.env.MO
 const probe = async (url, timeout) => {
 	try {
 		const response = await fetch(url, { signal: AbortSignal.timeout(timeout), redirect: 'manual' });
+		const report = response.ok ? await response.json().catch(() => null) : null;
 
-		return { ok: response.status < 500 };
+		return { ok: response.status < 500, report: report && typeof report === 'object' ? report : null };
 	} catch {
 		return { ok: false };
 	}

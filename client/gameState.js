@@ -46,3 +46,23 @@ const since = (stamp, now) => {
 
 	return `${Math.round(minutes / 1440)}d ago`;
 };
+
+const plural = (count, word) => `${count} ${word}${count === 1 ? '' : 's'}`;
+
+// What a game's status report is worth showing on its card, as chips: who's here, what's going, the game's own
+// numbers, then what it costs to run. Nothing for a game that doesn't report (not on the framework, or off).
+export const reportChips = report => {
+	if (!report) return [];
+
+	const chips = [{ value: report.connections ?? 0, label: 'here now', lead: true }];
+
+	if (report.games > 0)
+		chips.push({ value: plural(report.players ?? 0, 'player'), label: `in ${plural(report.games, 'game')}` });
+
+	for (const { label, value } of report.metrics ?? []) chips.push({ value: String(value ?? ''), label: String(label) });
+
+	if (report.memory > 0)
+		chips.push({ value: `${Math.round(report.memory / 1048576)} MB`, label: 'memory', quiet: true });
+
+	return chips;
+};
