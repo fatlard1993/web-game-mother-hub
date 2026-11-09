@@ -15,6 +15,7 @@ The hub lives on the htpc beside the games, and [dotfiles](https://github.com/fa
 | `MOTHER_HUB_PUBLIC_HOST` | `--public-host` |  | the VPS's address as players type it |
 | `MOTHER_HUB_LAN_NAMES` | `--lan-names` | `~/.config/lan-names.urls` | each service's LAN address, as `lan-names` writes it |
 | `MOTHER_HUB_PORT` | `--port` | `8036` | where the page is served |
+| `MOTHER_HUB_UPDATE_AT` | `--update-at` | `04:00` | when, each night, the games set to update themselves are |
 |  | `--database` | `~/.web-game-mother-hub.json` | the games and their settings |
 |  | `--projects` | `~/Projects` | where the games are, as `bun-server@` runs them |
 |  | `--slots` | `8` | how many games can be open to the internet at once |
