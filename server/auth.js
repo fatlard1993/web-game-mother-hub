@@ -10,7 +10,11 @@ export const createAuth = async ({ db, password }) => {
 
 	stored.secret ||= randomBytes(32).toString('hex');
 
-	if (password) stored.passwordHash = await Bun.password.hash(password);
+	// Hashed again only when it's a new password: each hash is salted afresh, and sessions are signed with the hash, so
+	// hashing the same password at every start would log every device out at every restart
+	const unchanged = password && stored.passwordHash && (await Bun.password.verify(password, stored.passwordHash));
+
+	if (password && !unchanged) stored.passwordHash = await Bun.password.hash(password);
 	else if (!stored.passwordHash) {
 		const generated = randomBytes(9).toString('base64url');
 

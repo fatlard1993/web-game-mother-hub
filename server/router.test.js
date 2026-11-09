@@ -58,3 +58,12 @@ test("another site's page can't press the buttons, even riding a login", async (
 
 	expect(response.status).toBe(403);
 });
+
+test('a restart with the same password keeps everyone logged in; a new password logs them out', async () => {
+	const store = db();
+	const first = await createAuth({ db: store, password: 'hunter2' });
+	const session = new Request('http://hub/', { headers: { cookie: first.sessionCookie().split(';')[0] } });
+
+	expect((await createAuth({ db: store, password: 'hunter2' })).isLoggedIn(session)).toBe(true);
+	expect((await createAuth({ db: store, password: 'swordfish' })).isLoggedIn(session)).toBe(false);
+});
