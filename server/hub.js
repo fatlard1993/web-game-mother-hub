@@ -13,6 +13,8 @@ import { gameUnit, tunnelUnit } from './units';
 // shelf (3100-3999), so a game the arcade is still building and one served here never fight over a port.
 const ASSIGNED_PORTS = [4100, 4199];
 const GIT_CACHE_MS = 30_000;
+// A fetch or rev-parse that takes longer is a network or disk that's stuck, and the round moves on
+const GIT_TIMEOUT_MS = 2 * 60 * 1000;
 const HEALTH_TIMEOUT_MS = 1500;
 const OPERATION_LINES = 400;
 // What leaves a game freshly started, and so worth a new picture of
@@ -430,7 +432,7 @@ export const createHub = ({
 	};
 
 	const gitOut = async (record, ...argv) => {
-		const { code, output } = await run(['git', '-C', record.dir, ...argv]);
+		const { code, output } = await run(['git', '-C', record.dir, ...argv], { timeout: GIT_TIMEOUT_MS });
 
 		return code === 0 ? output.trim() : null;
 	};

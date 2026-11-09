@@ -18,11 +18,15 @@ export const plainEnvironment = (from = process.env) =>
 	Object.fromEntries(PLAIN.filter(name => from[name] !== undefined).map(name => [name, from[name]]));
 
 // Runs a command to its end, its output (stdout and stderr together, in order) handed line by line to onLine as it
-// comes and returned whole with the exit code. `plain` gives it the plain environment instead of the hub's own.
-export const run = async (argv, { cwd, env, onLine, plain = false } = {}) => {
+// comes and returned whole with the exit code. `plain` gives it the plain environment instead of the hub's own. One
+// that runs past its timeout is killed and says so, so a stuck install or fetch can't hold a game busy for good.
+const TIMEOUT_MS = 10 * 60 * 1000;
+
+export const run = async (argv, { cwd, env, onLine, plain = false, timeout = TIMEOUT_MS } = {}) => {
 	const child = Bun.spawn(argv, {
 		cwd,
 		env: { ...(plain ? plainEnvironment() : process.env), ...env },
+		timeout,
 		stdin: 'ignore',
 		stdout: 'pipe',
 		stderr: 'pipe',
@@ -55,5 +59,12 @@ export const run = async (argv, { cwd, env, onLine, plain = false } = {}) => {
 
 	await Promise.all([read(child.stdout), read(child.stderr)]);
 
-	return { code: await child.exited, output: lines.join('\n') };
+	const code = await child.exited;
+
+	if (child.signalCode && child.killed) {
+		lines.push(`Stopped after ${Math.round(timeout / 1000)}s: it took too long`);
+		onLine?.(lines.at(-1));
+	}
+
+	return { code: code ?? 1, output: lines.join('\n') };
 };
