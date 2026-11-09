@@ -79,7 +79,7 @@ export const createRouter = ({ hub, auth, projectsRoot, pageRoot = 'client/build
 			await Bun.write(file, await request.arrayBuffer());
 
 			try {
-				return Response.json(await hub.hostBundle(match.name, file));
+				return Response.json(await hub.hostBundle(match.name, file, { whenIdle: match.whenIdle === '1' }));
 			} finally {
 				await rm(file, { force: true });
 			}

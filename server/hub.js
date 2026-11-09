@@ -397,10 +397,26 @@ export const createHub = ({
 			log('✓ Hosted');
 		})();
 
-	const hostFolder = async (id, target) => {
+	// Asked to wait for an idle game (paude keeping a game current as it's built), one with players gets its new code
+	// but not the rebuild and restart: those wait for the players to go, or the night's round
+	const playing = async record =>
+		(await units.state(gameUnit(record.id))).active &&
+		(await probe(`http://127.0.0.1:${record.port}${STATUS_PATH}`, HEALTH_TIMEOUT_MS)).report?.connections > 0;
+
+	const hostFolder = async (id, target, { whenIdle = false } = {}) => {
 		const record = games()[id] ?? (await add(target).then(() => games()[id]));
 
 		record.hosted = 'paude';
+
+		if (whenIdle && (await playing(record))) {
+			record.pendingHost = true;
+			updateWaiting.set(id, 'players');
+			await db.write();
+
+			return { id, name: record.name, port: record.port, url: lanUrl(record.port), deferred: true, lines: [] };
+		}
+
+		record.pendingHost = false;
 		await db.write();
 
 		const { operation, done } = operate(id, 'host', (current, log) => hostHere(current, log));
@@ -425,6 +441,15 @@ export const createHub = ({
 	const autoUpdateRound = async ({ updating = true } = {}) => {
 		for (const record of Object.values(games())) {
 			if (operations.get(record.id)?.running) continue;
+
+			// A hosting that waited for its players goes ahead once they've gone
+			if (updating && record.pendingHost) {
+				if (await playing(record)) continue;
+
+				updateWaiting.delete(record.id);
+				await hostFolder(record.id, record.dir).catch(error => console.error(`Hosting ${record.id} failed`, error));
+				continue;
+			}
 
 			const upstream =
 				(await gitOut(record, 'rev-parse', '@{u}')) && (await gitOut(record, 'fetch', '--quiet')) !== null;
@@ -464,7 +489,7 @@ export const createHub = ({
 
 		// paude's arcade putting a game with the house's: hosted in place when the hub sees the same repo at the same
 		// commit (the same machine), and otherwise asking for it as a git bundle (hostBundle), which works from anywhere
-		host: async ({ name, dir, head }) => {
+		host: async ({ name, dir, head, whenIdle = false }) => {
 			const id = hostedName(name);
 			const target = path.join(projectsRoot, id);
 			const here =
@@ -475,11 +500,11 @@ export const createHub = ({
 
 			if (!here || here !== head) return { needsBundle: true };
 
-			return hostFolder(id, target);
+			return hostFolder(id, target, { whenIdle });
 		},
 
 		// The game's repo as a bundle: cloned into the projects folder the first time, brought forward after
-		hostBundle: async (name, bundleFile) => {
+		hostBundle: async (name, bundleFile, { whenIdle = false } = {}) => {
 			const id = hostedName(name);
 			const target = path.join(projectsRoot, id);
 			const record = games()[id];
@@ -500,7 +525,7 @@ export const createHub = ({
 					throw new ValidationError(`${id}'s new version doesn't follow on from the one here`);
 			}
 
-			return hostFolder(id, target);
+			return hostFolder(id, target, { whenIdle });
 		},
 
 		// The night's round at `at` (HH:MM, local time) every night from now on, and again an hour later while a game

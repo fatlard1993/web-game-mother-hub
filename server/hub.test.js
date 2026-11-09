@@ -793,3 +793,34 @@ describe('hosting for paude', () => {
 		await expect(hub.hostBundle('mine', await bundleOf(dir))).rejects.toThrow("isn't a game paude hosted");
 	});
 });
+
+test("hosting asked to wait for an idle game holds the rebuild while someone plays, and the night's round does it", async () => {
+	let connections = 2;
+	const units = fakeUnits();
+	const ran = [];
+	const hub = createHub({
+		db: fakeDb(),
+		units,
+		run: async argv => (ran.push(argv.join(' ')), { code: 0, output: argv.includes('HEAD') ? 'abc' : '' }),
+		probe: async () => ({ ok: true, report: { connections } }),
+		projectsRoot: root,
+		resetsDir: path.join(root, 'resets'),
+		exposure: {},
+		bun: 'bun',
+		hubDir: root,
+	});
+	const dir = await makeGame('sand', { scaffold: true });
+
+	await hub.host({ name: 'sand', dir, head: 'abc' });
+	ran.length = 0;
+
+	expect(await hub.host({ name: 'sand', dir, head: 'abc', whenIdle: true })).toMatchObject({ deferred: true });
+	expect(ran.filter(command => command.startsWith('bun'))).toEqual([]);
+	expect((await hub.get('sand')).updateWaiting).toBe('players');
+
+	connections = 0;
+	await hub.autoUpdateRound();
+
+	expect(ran.filter(command => command.startsWith('bun'))).toEqual(['bun install', 'bun run build']);
+	expect((await hub.get('sand')).pendingHost).toBe(false);
+});
