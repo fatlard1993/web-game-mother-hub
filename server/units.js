@@ -163,11 +163,16 @@ export const createUnits = ({
 		return [...output.matchAll(/^bun-server@([\w.-]+)\.service/gm)].map(match => match[1]);
 	};
 
-	// The connections open to a port right now: players on a game that doesn't say how many it has
-	const connectionsTo = async port => {
-		const { output } = await run(['ss', '-tnH', 'state', 'established', `( sport = :${port} )`]);
+	// The connections open to a port right now, less the hub's own (its health checks): players on a game that doesn't
+	// say how many it has
+	const connectionsTo = async (port, { except = process.pid } = {}) => {
+		const lines = async argv => (await run(argv)).output.split('\n').filter(line => line.trim());
+		const all = await lines(['ss', '-tnH', 'state', 'established', `( sport = :${port} )`]);
+		const ours = (await lines(['ss', '-tnpH', 'state', 'established', `( dport = :${port} )`])).filter(line =>
+			line.includes(`pid=${except},`),
+		);
 
-		return output.split('\n').filter(line => line.trim()).length;
+		return Math.max(0, all.length - ours.length);
 	};
 
 	const logs = async (name, lines = 200) =>

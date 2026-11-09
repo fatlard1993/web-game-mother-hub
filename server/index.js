@@ -131,7 +131,13 @@ const hubDir = path.resolve(import.meta.dir, '..');
 
 const probe = async (url, timeout) => {
 	try {
-		const response = await fetch(url, { signal: AbortSignal.timeout(timeout), redirect: 'manual' });
+		// Not kept alive: a connection left open to a game would look like someone playing it
+		const response = await fetch(url, {
+			signal: AbortSignal.timeout(timeout),
+			redirect: 'manual',
+			keepalive: false,
+			headers: { connection: 'close' },
+		});
 		const report = response.ok ? await response.json().catch(() => null) : null;
 
 		return { ok: response.status < 500, report: report && typeof report === 'object' ? report : null };
