@@ -81,8 +81,9 @@ export const createHub = ({
 	const updateWaiting = new Map();
 	const gitCache = new Map();
 
+	// Own keys only: an id from a URL could otherwise name what every object inherits (__proto__)
 	const game = id => {
-		const record = games()[id];
+		const record = Object.hasOwn(games(), id) ? games()[id] : null;
 
 		if (!record) throw new NotFoundError(`No game "${id}"`);
 

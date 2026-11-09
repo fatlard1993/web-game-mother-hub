@@ -982,3 +982,10 @@ describe('changes that keep the hub honest', () => {
 		expect((await hub.expose(sand.id).done).ok).toBe(true);
 	});
 });
+
+test('an id that names what every object inherits is no game', async () => {
+	const { hub } = setup();
+
+	await expect(hub.get('__proto__')).rejects.toThrow('No game');
+	await expect(hub.get('constructor')).rejects.toThrow('No game');
+});

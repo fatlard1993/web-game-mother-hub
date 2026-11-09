@@ -78,7 +78,16 @@ export const createRouter = ({ hub, auth, projectsRoot, pageRoot = 'client/build
 			});
 	};
 
-	const file = found => new Response(Bun.file(found), { headers: { 'cache-control': 'private, max-age=86400' } });
+	// A game's own files (its icon, pictures, the hub's picture of it), served on the hub's origin: sandboxed, so an SVG
+	// opened straight from here can't run script with the admin's session
+	const file = found =>
+		new Response(Bun.file(found), {
+			headers: {
+				'cache-control': 'private, max-age=86400',
+				'content-security-policy': "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; sandbox",
+				'x-content-type-options': 'nosniff',
+			},
+		});
 
 	// What makes a game's card, for anyone: its icon, its README and its pictures
 	const pictures = async request => {

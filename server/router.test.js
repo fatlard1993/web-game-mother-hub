@@ -194,3 +194,20 @@ describe('logging in', () => {
 		expect(third - stranger).toBeGreaterThan(500);
 	});
 });
+
+test("a game's files are served sandboxed, and an id like __proto__ is just no game", async () => {
+	const { mkdtemp, writeFile } = await import('fs/promises');
+	const os = await import('os');
+	const path = await import('path');
+	const dir = await mkdtemp(path.join(os.tmpdir(), 'hub-file-'));
+	const icon = path.join(dir, 'icon.svg');
+
+	await writeFile(icon, '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>');
+
+	const auth = await createAuth({ db: db(), password: 'hunter2' });
+	const router = createRouter({ hub: { icon: async () => icon }, auth, projectsRoot: '/nowhere' });
+	const response = await router(new Request('http://hub/api/games/sand/icon'));
+
+	expect(response.headers.get('content-security-policy')).toContain('sandbox');
+	expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+});
