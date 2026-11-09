@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
@@ -73,4 +73,32 @@ test('a link into the repo keeps its words; a link out stays a link', async () =
 
 test('no README is nothing to say', async () => {
 	expect(await readDocs({ id: 'g', dir })).toEqual({ blurb: null, media: [], markdown: null });
+});
+
+test('a README or picture that links outside the game is not read or served', async () => {
+	const secret = path.join(path.dirname(dir), `secret-${path.basename(dir)}.json`);
+
+	await writeFile(secret, '{"auth":{"secret":"do-not-serve"}}');
+	await symlink(secret, path.join(dir, 'README.md'));
+
+	expect(await readDocs({ id: 'g', dir })).toEqual({ blurb: null, media: [], markdown: null });
+
+	await rm(path.join(dir, 'README.md'));
+	await mkdir(path.join(dir, 'img'));
+	await symlink(secret, path.join(dir, 'img/play.png'));
+	await write('README.md', 'A game for the whole house to play together.\n\n![Play](./img/play.png)');
+
+	const docs = await readDocs({ id: 'g', dir });
+
+	expect(docs.media).toEqual([]);
+	expect(JSON.stringify(docs)).not.toContain('do-not-serve');
+	await rm(secret);
+});
+
+test('a picture linked to another file inside the game is served as that file', async () => {
+	await write('img/real.png');
+	await symlink(path.join(dir, 'img/real.png'), path.join(dir, 'img/alias.png'));
+	await write('README.md', '![Play](./img/alias.png)');
+
+	expect((await readDocs({ id: 'g', dir })).media.map(item => item.file)).toEqual([path.join(dir, 'img/real.png')]);
 });

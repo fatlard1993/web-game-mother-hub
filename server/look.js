@@ -1,6 +1,8 @@
-import { existsSync, statSync } from 'fs';
+import { statSync } from 'fs';
 import { readFile } from 'fs/promises';
 import path from 'path';
+
+import { realWithin } from './within';
 
 // How a game looks, read the way a browser reads it: its web manifest's name, theme color and icons, and failing
 // those its page's <title>, theme-color and icon link. A game with no color of its own gets one from its id, steady
@@ -50,13 +52,11 @@ export const fallbackColor = id => {
 
 const isColor = value => typeof value === 'string' && /^(#[0-9a-f]{3,8}|(rgb|hsl)a?\([^)]*\))$/i.test(value.trim());
 
-// A file the page names, kept inside the game's client folder however the href is written
+// A file the page names, kept inside the game's client folder however the href is written, or linked
 const inClient = (clientDir, href) => {
 	if (!href || /^[a-z]+:/i.test(href)) return null;
 
-	const file = path.resolve(clientDir, href.replace(/^\//, '').split(/[?#]/)[0]);
-
-	return file.startsWith(clientDir + path.sep) && existsSync(file) ? file : null;
+	return realWithin(clientDir, path.resolve(clientDir, href.replace(/^\//, '').split(/[?#]/)[0]));
 };
 
 export const readLook = async ({ id, dir }) => {

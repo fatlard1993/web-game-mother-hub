@@ -2,6 +2,8 @@ import { existsSync, statSync } from 'fs';
 import { readdir, readFile } from 'fs/promises';
 import path from 'path';
 
+import { realWithin } from './within';
+
 // What a game says about itself in its README: the paragraph that introduces it, and the pictures it shows off,
 // captioned by their alt text. The house READMEs are written to be read cold, so they make a good card and a good
 // page without anyone writing either twice.
@@ -13,7 +15,7 @@ const findReadme = async dir => {
 	try {
 		const name = (await readdir(dir)).find(file => /^readme\.md$/i.test(file));
 
-		return name ? path.join(dir, name) : null;
+		return name ? realWithin(dir, path.join(dir, name)) : null;
 	} catch {
 		return null;
 	}
@@ -30,9 +32,12 @@ const isRemote = href => /^[a-z][\d+.a-z-]*:/i.test(href) || href.startsWith('//
 const localFile = (dir, readmeDir, href) => {
 	if (!href || isRemote(href) || href.startsWith('#')) return null;
 
-	const file = path.resolve(readmeDir, decodeURIComponent(href.split(/[?#]/)[0]));
-
-	return file.startsWith(dir + path.sep) ? file : null;
+	try {
+		return realWithin(dir, path.resolve(readmeDir, decodeURIComponent(href.split(/[?#]/)[0])));
+	} catch {
+		// A malformed escape in the href is no picture
+		return null;
+	}
 };
 
 const plain = text =>

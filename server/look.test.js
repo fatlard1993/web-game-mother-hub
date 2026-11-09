@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, expect, test } from 'bun:test';
@@ -70,4 +70,16 @@ test("an icon named outside the game's client folder is not served", async () =>
 	await write('secret.png', '');
 
 	expect((await readLook({ id: 'x', dir })).icon).toBe(null);
+});
+
+test("an icon or manifest that links outside the game's client folder is not used", async () => {
+	const secret = path.join(path.dirname(dir), `key-${path.basename(dir)}`);
+
+	await writeFile(secret, 'private');
+	await mkdir(path.join(dir, 'client'), { recursive: true });
+	await symlink(secret, path.join(dir, 'client/favicon.svg'));
+	await symlink(secret, path.join(dir, 'client/manifest.json'));
+
+	expect((await readLook({ id: 'x', dir })).icon).toBe(null);
+	await rm(secret);
 });
