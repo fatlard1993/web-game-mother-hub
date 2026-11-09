@@ -8,8 +8,8 @@ const escapeHtml = text =>
 
 // breaks: true, game rules are often written as plain lines; GFM line breaks keep
 // single newlines visible instead of collapsing them into one paragraph.
-// The html renderer and walkTokens sanitize: descriptions arrive from third parties (Steam
-// store, pasted text) and land in innerHTML, so raw HTML renders as visible text instead of
+// The html renderer and walkTokens sanitize: a game's README is written by whoever made the game (a kid's
+// Claude, a bundle from paude) and lands in innerHTML, so raw HTML renders as visible text instead of
 // executing, and every link href goes through the scheme allowlist. Markdown covers the rest.
 marked.use({
 	breaks: true,

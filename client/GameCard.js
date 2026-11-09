@@ -409,7 +409,7 @@ export default class GameCard extends StyledCard {
 			});
 		}
 
-		// Updating, by hand or by itself. A game with nothing upstream (an arcade game shelved from the folder it's built
+		// Updating, by hand or by itself. A game with nothing upstream (an arcade game hosted from the folder it's built
 		// in) can still be rebuilt from what's there, but has nothing to update itself from.
 		const hasUpstream = game.git?.behind != null;
 		const behind = game.git?.behind ?? 0;

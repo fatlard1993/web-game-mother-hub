@@ -497,7 +497,7 @@ describe('living with dotfiles', () => {
 		await rm(elsewhere, { recursive: true, force: true });
 	});
 
-	test("the bun-server@ units' games are listed on their own, keeping a port shelf-game gave, and never the hub", async () => {
+	test("the bun-server@ units' games are listed on their own, keeping the port its drop-in gives it, and never the hub", async () => {
 		const { hub, units } = setup();
 
 		await makeGame('humanity', { scripts: { 'service:enable': 'x --port 8032' } });

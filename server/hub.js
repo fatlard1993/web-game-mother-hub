@@ -9,8 +9,8 @@ import { readDocs } from './docs';
 import { readLook } from './look';
 import { gameUnit, tunnelUnit } from './units';
 
-// Ports handed to games that don't come with one of their own (the scaffold's games). Kept clear of paude's arcade
-// shelf (3100-3999), so a game the arcade is still building and one served here never fight over a port.
+// Ports handed to games that don't come with one of their own (the scaffold's games): clear of the scaffold's own 3000,
+// which paude's dev servers for games being built take first, and of the ports the older games already hold
 const ASSIGNED_PORTS = [4100, 4199];
 const GIT_CACHE_MS = 30_000;
 // A fetch or rev-parse that takes longer is a network or disk that's stuck, and the round moves on
@@ -166,23 +166,23 @@ export const createHub = ({
 		if (code !== 0) throw new Error(`${argv.slice(0, 3).join(' ')} failed (exit ${code})`);
 	};
 
+	const gitOut = async (record, ...argv) => {
+		const { code, output } = await run(['git', '-C', record.dir, ...argv], { timeout: GIT_TIMEOUT_MS });
+
+		return code === 0 ? output.trim() : null;
+	};
+
 	const gitInfo = async record => {
 		const cached = gitCache.get(record.id);
 
 		if (cached && now() - cached.at < GIT_CACHE_MS) return cached.info;
 
-		const git = async (...argv) => {
-			const { code, output } = await run(['git', '-C', record.dir, ...argv]);
-
-			return code === 0 ? output.trim() : null;
-		};
-
 		const [branch, last, status, behind] = await Promise.all([
-			git('rev-parse', '--abbrev-ref', 'HEAD'),
-			git('log', '-1', '--format=%h%x09%cr%x09%s'),
+			gitOut(record, 'rev-parse', '--abbrev-ref', 'HEAD'),
+			gitOut(record, 'log', '-1', '--format=%h%x09%cr%x09%s'),
 			// Edits to what the repo tracks, which is what stands in a pull's way; builds and installs leave the rest
-			git('status', '--porcelain', '--untracked-files=no'),
-			git('rev-list', '--count', 'HEAD..@{u}'),
+			gitOut(record, 'status', '--porcelain', '--untracked-files=no'),
+			gitOut(record, 'rev-list', '--count', 'HEAD..@{u}'),
 		]);
 
 		const [commit, age, subject] = last?.split('\t') ?? [];
@@ -325,7 +325,7 @@ export const createHub = ({
 			throw new ValidationError(`The hub runs games from folders in ${projectsRoot}, as bun-server@ does`);
 		if (games()[record.id]) throw new ValidationError(`${games()[record.id].name} is already here`);
 
-		// A port given it already is kept: one asked for here, else shelf-game's drop-in, else the one it's running on
+		// A port given it already is kept: one asked for here, else its port.conf drop-in, else the one it's running on
 		// now, else the one its package names; only a game with none of those is handed one
 		const dropIn = await units.portOf(gameUnit(record.id));
 		const listening = await units.listeningPort(gameUnit(record.id));
@@ -343,7 +343,7 @@ export const createHub = ({
 		return status(record);
 	};
 
-	// The bun-server@ units systemd knows, the games dotfiles' game-servers runs and the arcade's shelf-game puts there,
+	// The bun-server@ units systemd knows, the games dotfiles' game-servers runs and any started by hand,
 	// each listed here as soon as it's seen, unless it was forgotten here
 	let discoveredAt = 0;
 
@@ -363,8 +363,6 @@ export const createHub = ({
 		}
 	};
 
-	// Pulls, installs and builds. Any step failing stops it there, and the running game is left alone: still the code
-	// it was started with, since it's only restarted once everything before it worked.
 	// Frozen, as dotfiles installs them: a plain install rewrites bun.lock when the framework drifts ahead of it, and the
 	// dirty file stops every pull after
 	const build = async (record, log) => {
@@ -374,6 +372,8 @@ export const createHub = ({
 		if (record.hasBuild) await step(log, [bun, 'run', 'build'], record.dir);
 	};
 
+	// Pulls, installs and builds, then restarts a running game. A step that fails stops it there, its pull taken back,
+	// and the running game is left as it was.
 	const update = id =>
 		operate(id, 'update', async (record, log) => {
 			// A game hosted from paude's arcade has nothing to pull from (paude sends it); what's there is built
@@ -490,12 +490,6 @@ export const createHub = ({
 			throw new GoneError(`${id} was forgotten in the mother hub; host it again on purpose to bring it back`);
 
 		if (again) db.data.forgottenHosted = forgottenHosted().filter(each => each !== id);
-	};
-
-	const gitOut = async (record, ...argv) => {
-		const { code, output } = await run(['git', '-C', record.dir, ...argv], { timeout: GIT_TIMEOUT_MS });
-
-		return code === 0 ? output.trim() : null;
 	};
 
 	// One pass over every game: each with an upstream is fetched, so its card says what's waiting, and, when it's the
@@ -827,7 +821,6 @@ export const createHub = ({
 			return open.length;
 		},
 
-		// The tunnel's lines follow the game's, for an exposed game: that's where the VPS says why it refused
 		icon: async id => (await readLook(game(id))).icon,
 
 		// The README, its pictures pointed at the hub, for the game's page
@@ -855,6 +848,7 @@ export const createHub = ({
 			return photograph(record);
 		},
 
+		// The tunnel's lines follow the game's, for an exposed game: that's where the VPS says why it refused
 		logs: async (id, lines) => {
 			const record = game(id);
 			const logs = await units.logs(gameUnit(id), lines);

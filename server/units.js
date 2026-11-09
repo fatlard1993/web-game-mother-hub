@@ -5,9 +5,9 @@ import path from 'path';
 import { service } from '@vanilla-bean/components/app';
 
 // The games run as instances of the bun-server@ template unit that dotfiles links (profiles/htpc/systemd), the same
-// units its game-servers loop and shelf-game start: bun-server@<folder> runs `bun run start` in ~/Projects/<folder>.
-// The hub only turns them on and off and sets their port, in the same port.conf drop-in shelf-game writes, so there's
-// one place a game's port is kept. Tunnels are the hub's own units, made with vbc's service.
+// units its game-servers loop starts: bun-server@<folder> runs `bun run start` in ~/Projects/<folder>. The hub turns
+// them on and off and sets their port in a port.conf drop-in, the one place a game's port is kept. Where there's no
+// template (a machine paude hosts on by itself) the hub installs its own. Tunnels are the hub's own units.
 
 export const gameUnit = id => `bun-server@${id}`;
 export const tunnelUnit = id => `mother-hub-tunnel-${id}`;
@@ -51,7 +51,7 @@ export const createUnits = ({
 		};
 	};
 
-	// The port a game's drop-in gives it, as shelf-game or the hub wrote it
+	// The port a game's drop-in gives it
 	const portOf = async name => {
 		const text = await readFile(dropIn(name), 'utf8').catch(() => '');
 
@@ -156,7 +156,7 @@ export const createUnits = ({
 	const removeTunnel = name =>
 		service('disable', { name }, { run: argv => run(argv).then(result => result.code), log: () => {} });
 
-	// The bun-server@ instances systemd knows of, by folder: what dotfiles' game-servers and shelf-game have started
+	// The bun-server@ instances systemd knows of, by folder
 	const instances = async () => {
 		const { output } = await systemctl('list-units', '--all', '--plain', '--no-legend', 'bun-server@*');
 

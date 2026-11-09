@@ -1,4 +1,4 @@
-// Hrefs here reach innerHTML (Markdown) or an anchor's href property (links, attachments), and
+// Hrefs here reach innerHTML (a game's README, through Markdown), and
 // the HTML parser decodes entities in attribute values *after* the markdown renderer is done
 // with them: `&#106;avascript:alert(1)` passes a raw-text check and still becomes `javascript:`
 // by the time it is clicked. So decode first, then judge, and judge against an allowlist. A

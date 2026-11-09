@@ -26,12 +26,7 @@
 		"lint": "bun --bun eslint",
 		"lint:fix": "bun --bun eslint --fix",
 		"format": "bun run lint:fix && bun --bun prettier --write .",
-		"deploy": "bun run build && bun run service:reload",
-		"service:enable": "vbc-service enable --port 8036 --description \"Web game mother hub\"",
-		"service:disable": "vbc-service disable",
-		"service:start": "vbc-service start",
-		"service:stop": "vbc-service stop",
-		"service:reload": "vbc-service reload"
+		"deploy": "bun run build && systemctl --user restart bun-server@web-game-mother-hub"
 	},
 	"dependencies": {
 		"@vanilla-bean/components": "^7.0.4",
