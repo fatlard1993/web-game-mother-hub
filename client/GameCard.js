@@ -246,6 +246,7 @@ const ago = stamp => {
 export default class GameCard extends StyledCard {
 	static schema = {
 		game: {},
+		admin: {},
 		exposure: {},
 		onChanged: {},
 		onSettings: {},
@@ -348,6 +349,40 @@ export default class GameCard extends StyledCard {
 
 		this.metrics = new Elem({ appendTo: body, addClass: 'metrics' });
 		this.showReport(game.report);
+
+		// A player's card ends here: somewhere to play it, where it's shared while it's open to the internet, and what
+		// it is. Running the games is the admin's.
+		if (!this.options.admin) {
+			new Component({
+				appendTo: body,
+				addClass: 'row',
+				append: [
+					game.unit.active &&
+						new Button({
+							icon: 'play',
+							textContent: 'Play',
+							intent: 'success',
+							onPointerPress: () => window.open(lanUrl, '_blank'),
+						}),
+					game.exposed &&
+						game.publicUrl &&
+						new Button({
+							icon: 'copy',
+							variant: 'flat',
+							textContent: 'Copy its internet address',
+							tooltip: game.publicUrl,
+							onPointerPress: () =>
+								navigator.clipboard
+									.writeText(game.publicUrl)
+									.then(() => new Notify({ intent: 'success', content: `Copied ${game.publicUrl}` })),
+						}),
+					(about.hasReadme || about.pictures > 0) &&
+						new Button({ icon: 'book-open', variant: 'flat', textContent: 'About', onPointerPress: openAbout }),
+				].filter(Boolean),
+			});
+
+			return;
+		}
 
 		if (game.git) {
 			const { branch, commit, age, subject, dirty, behind } = game.git;

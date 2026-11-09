@@ -2,7 +2,7 @@ import { Button, Component, Content, Dialog, EmptyState, Notify, Toolbar, styled
 
 import { closeAll, failure, getGames, getHub, logOut } from './api';
 import { aboutDialog } from './About';
-import { addDialog, logsDialog, settingsDialog } from './dialogs';
+import { addDialog, loginDialog, logsDialog, settingsDialog } from './dialogs';
 import GameCard from './GameCard';
 
 const POLL_MS = 3000;
@@ -17,7 +17,7 @@ const Grid = styled.Component`
 `;
 
 export default class Hub extends Component {
-	static schema = { onLoggedOut: {} };
+	static schema = { admin: {}, onSessionChanged: {} };
 
 	build() {
 		this.cards = new Map();
@@ -41,30 +41,48 @@ export default class Hub extends Component {
 			},
 		});
 
+		const { admin, onSessionChanged } = this.options;
+
 		new Toolbar({
 			appendTo: this,
 			variant: 'bar',
 			heading: 'Mother Hub',
-			append: [
-				this.closeAllButton,
-				new Button({ icon: 'plus', textContent: 'Add a game', onPointerPress: () => addDialog(() => this.refresh()) }),
-				new Button({
-					icon: 'right-from-bracket',
-					variant: 'flat',
-					tooltip: 'Log out',
-					onPointerPress: async () => {
-						await logOut();
-						this.options.onLoggedOut?.();
-					},
-				}),
-			],
+			append: admin
+				? [
+						this.closeAllButton,
+						new Button({
+							icon: 'plus',
+							textContent: 'Add a game',
+							onPointerPress: () => addDialog(() => this.refresh()),
+						}),
+						new Button({
+							icon: 'right-from-bracket',
+							variant: 'flat',
+							tooltip: 'Log out',
+							onPointerPress: async () => {
+								await logOut();
+								onSessionChanged?.();
+							},
+						}),
+					]
+				: [
+						new Button({
+							icon: 'lock',
+							variant: 'flat',
+							textContent: 'Admin',
+							tooltip: 'Log in to turn games on and off, update, reset and share them',
+							onPointerPress: () => loginDialog(() => onSessionChanged?.()),
+						}),
+					],
 		});
 
 		this.grid = new Grid();
 		this.empty = new EmptyState({
 			icon: 'gamepad',
 			heading: 'No games yet',
-			body: 'Add one from its folder, and it can be turned on, updated, reset and shared from here.',
+			body: admin
+				? 'Add one from its folder, and it can be turned on, updated, reset and shared from here.'
+				: 'There are no games here yet.',
 			style: { display: 'none' },
 		});
 
@@ -89,7 +107,8 @@ export default class Hub extends Component {
 		try {
 			const response = await getGames();
 
-			if (response.status === 401) return this.options.onLoggedOut?.();
+			// A session that ran out mid-visit: the page goes back to the player's view
+			if (response.status === 401 && this.options.admin) return this.options.onSessionChanged?.();
 
 			games = response.ok ? await response.json() : null;
 		} catch {
@@ -129,8 +148,13 @@ export default class Hub extends Component {
 				game,
 				exposure: this.exposure,
 				onChanged: () => this.refresh(),
+				admin: this.options.admin,
 				onLogs: logsDialog,
-				onAbout: about => aboutDialog(about, () => this.refresh(), { canPhotograph: this.hubInfo.shots }),
+				onAbout: about =>
+					aboutDialog(about, () => this.refresh(), {
+						canPhotograph: this.hubInfo.shots,
+						canChooseCover: !!this.options.admin,
+					}),
 				onSettings: () => settingsDialog(game, () => this.refresh()),
 			});
 

@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import { createAuth } from './auth';
+import { forPlayer, hubForPlayer } from './roles';
 import { createRouter } from './router';
 
 const db = () => ({ data: {}, write: async () => {} });
@@ -17,11 +18,60 @@ const setup = async () => {
 
 const loggedIn = auth => ({ cookie: auth.sessionCookie().split(';')[0] });
 
-test('nothing under /api answers without logging in', async () => {
+test('a player finds the games without logging in, and every action, log or setting takes the admin', async () => {
 	const { router } = await setup();
+	const get = url => router(new Request(`http://hub${url}`));
+	const send = (method, url) => router(new Request(`http://hub${url}`, { method }));
 
-	expect((await router(new Request('http://hub/api/games'))).status).toBe(401);
-	expect((await router(new Request('http://hub/api/games/game/turnOff', { method: 'POST' }))).status).toBe(401);
+	expect((await get('/api/games')).status).toBe(200);
+	expect(await (await get('/api/session')).json()).toEqual({ loggedIn: false, role: 'player' });
+
+	for (const [method, url] of [
+		['POST', '/api/games/game/turnOff'],
+		['POST', '/api/games/game/expose'],
+		['POST', '/api/games/game/reset'],
+		['PATCH', '/api/games/game'],
+		['DELETE', '/api/games/game'],
+		['GET', '/api/games/game/logs'],
+		['GET', '/api/candidates'],
+		['POST', '/api/exposure/off'],
+		['POST', '/api/host'],
+	])
+		expect([method, url, (await send(method, url)).status]).toEqual([method, url, 401]);
+});
+
+test("a player's view of a game leaves out its folder, saves, git and what the commands printed", async () => {
+	const game = {
+		id: 'humanity',
+		name: 'Humanity',
+		port: 8032,
+		dir: '/home/home/Projects/humanity',
+		databases: ['/home/home/.humanity.json'],
+		git: { branch: 'main', commit: 'abc', dirty: false },
+		exposed: true,
+		publicUrl: 'https://203.0.113.7:9101',
+		lanUrl: 'http://humanity.home',
+		unit: { active: true, state: 'active', restarts: 0, since: null, enabled: true },
+		health: { ok: true },
+		operation: { kind: 'update', running: true, lines: ['$ git pull', 'secret path'], error: null },
+		look: { color: '#fff' },
+		about: { blurb: 'cards' },
+	};
+	const seen = forPlayer(game);
+
+	expect(seen).toMatchObject({
+		name: 'Humanity',
+		publicUrl: 'https://203.0.113.7:9101',
+		lanUrl: 'http://humanity.home',
+	});
+	expect(seen.operation).toEqual({ kind: 'update', running: true });
+	for (const key of ['dir', 'databases', 'git', 'autoUpdate', 'exposeSlot', 'defaultPort'])
+		expect(seen).not.toHaveProperty(key);
+	expect(JSON.stringify(seen)).not.toContain('/home/home');
+	expect(hubForPlayer({ exposure: { sshHost: 'ubuntu@203.0.113.7', configured: true } })).toEqual({
+		exposure: { configured: true },
+		shots: false,
+	});
 });
 
 test('a wrong password is refused', async () => {

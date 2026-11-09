@@ -6,7 +6,7 @@ export const loginDialog = onLoggedIn =>
 	new FormDialog({
 		header: 'Mother Hub',
 		saveLabel: 'Log in',
-		intro: 'This page starts, stops and shares the games, so it needs the password.',
+		intro: 'Turning games on and off, updating, resetting and sharing them takes the admin password.',
 		inputs: [{ key: 'password', label: 'Password', type: 'password' }],
 		data: { password: '' },
 		onSave: async ({ password }) => {

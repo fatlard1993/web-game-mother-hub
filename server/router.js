@@ -4,6 +4,7 @@ import path from 'path';
 import { requestMatch, sameOrigin, serveApp, ValidationError, withErrors } from '@vanilla-bean/components/app';
 
 import { findCandidates } from './detect';
+import { forPlayer, hubForPlayer } from './roles';
 
 const ACTIONS = ['turnOn', 'turnOff', 'restart', 'update', 'check', 'reset', 'expose', 'conceal'];
 
@@ -30,7 +31,11 @@ const jsonObject = async request => {
 
 export const createRouter = ({ hub, auth, projectsRoot, pageRoot = 'client/build' }) => {
 	const session = async (request, server) => {
-		if (requestMatch('GET', '/api/session', request)) return Response.json({ loggedIn: auth.isLoggedIn(request) });
+		if (requestMatch('GET', '/api/session', request)) {
+			const admin = auth.isLoggedIn(request);
+
+			return Response.json({ loggedIn: admin, role: admin ? 'admin' : 'player' });
+		}
 
 		if (requestMatch('POST', '/api/session', request)) {
 			const address = server?.requestIP(request)?.address || 'unknown';
@@ -52,6 +57,48 @@ export const createRouter = ({ hub, auth, projectsRoot, pageRoot = 'client/build
 
 		if (requestMatch('DELETE', '/api/session', request))
 			return new Response(null, { status: 204, headers: { 'Set-Cookie': auth.clearedCookie() } });
+	};
+
+	const file = found => new Response(Bun.file(found), { headers: { 'cache-control': 'private, max-age=86400' } });
+
+	// What makes a game's card, for anyone: its icon, its README and its pictures
+	const pictures = async request => {
+		let match;
+
+		// The URLs carry each file's version, so a new picture is a new URL and these can be kept
+		if ((match = requestMatch('GET', '/api/games/:id/icon', request))) {
+			const found = await hub.icon(match.id);
+
+			return found ? file(found) : Response.json({ error: 'No icon' }, { status: 404 });
+		}
+
+		if ((match = requestMatch('GET', '/api/games/:id/docs', request))) return Response.json(await hub.docs(match.id));
+
+		if ((match = requestMatch('GET', '/api/games/:id/media/:index', request))) {
+			const found = await hub.media(match.id, Number(match.index));
+
+			return found ? file(found) : Response.json({ error: 'No such picture' }, { status: 404 });
+		}
+
+		if ((match = requestMatch('GET', '/api/games/:id/shot', request))) {
+			const found = hub.shot(match.id);
+
+			return found ? file(found) : Response.json({ error: 'No picture yet' }, { status: 404 });
+		}
+	};
+
+	// What a player may have: the games as a player sees them, and their cards' pictures. The rest of /api is the admin's.
+	const playerApi = async request => {
+		let match;
+
+		if (requestMatch('GET', '/api/hub', request)) return Response.json(hubForPlayer(hub.hub()));
+
+		if (requestMatch('GET', '/api/games', request)) return Response.json((await hub.list()).map(forPlayer));
+
+		if ((match = requestMatch('GET', '/api/games/:id', request)))
+			return Response.json(forPlayer(await hub.get(match.id)));
+
+		return pictures(request);
 	};
 
 	const api = async request => {
@@ -98,32 +145,8 @@ export const createRouter = ({ hub, auth, projectsRoot, pageRoot = 'client/build
 			return new Response(null, { status: 204 });
 		}
 
-		if ((match = requestMatch('GET', '/api/games/:id/icon', request))) {
-			const file = await hub.icon(match.id);
-
-			if (!file) return Response.json({ error: 'No icon' }, { status: 404 });
-
-			// The URL carries the icon's version, so a new icon is a new URL and this one can be kept
-			return new Response(Bun.file(file), { headers: { 'cache-control': 'private, max-age=86400' } });
-		}
-
-		if ((match = requestMatch('GET', '/api/games/:id/docs', request))) return Response.json(await hub.docs(match.id));
-
-		if ((match = requestMatch('GET', '/api/games/:id/media/:index', request))) {
-			const file = await hub.media(match.id, Number(match.index));
-
-			if (!file) return Response.json({ error: 'No such picture' }, { status: 404 });
-
-			return new Response(Bun.file(file), { headers: { 'cache-control': 'private, max-age=86400' } });
-		}
-
-		if ((match = requestMatch('GET', '/api/games/:id/shot', request))) {
-			const file = hub.shot(match.id);
-
-			if (!file) return Response.json({ error: 'No picture yet' }, { status: 404 });
-
-			return new Response(Bun.file(file), { headers: { 'cache-control': 'private, max-age=86400' } });
-		}
+		const picture = await pictures(request);
+		if (picture) return picture;
 
 		if ((match = requestMatch('POST', '/api/games/:id/shot', request)))
 			return Response.json({ taken: await hub.photograph(match.id) });
@@ -154,7 +177,8 @@ export const createRouter = ({ hub, auth, projectsRoot, pageRoot = 'client/build
 		const answered = await session(request, server);
 		if (answered) return answered;
 
-		if (!auth.isLoggedIn(request)) return Response.json({ error: 'Log in first' }, { status: 401 });
+		if (!auth.isLoggedIn(request))
+			return (await playerApi(request)) ?? Response.json({ error: 'That takes the admin password' }, { status: 401 });
 
 		return (await api(request)) ?? Response.json({ error: 'Not found' }, { status: 404 });
 	};

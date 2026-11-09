@@ -99,7 +99,7 @@ const gallery = (media, { cover, onCover }) => {
 		current = (index + media.length) % media.length;
 		stage.elem.replaceChildren(new Elem({ tag: 'img', src: media[current].url, alt: media[current].alt }).elem);
 		captionText.elem.textContent = media[current].alt;
-		coverButton.elem.style.display = media[current].path === cover ? 'none' : '';
+		coverButton.elem.style.display = !onCover || media[current].path === cover ? 'none' : '';
 		[...thumbs.elem.children].forEach((thumb, at) => thumb.classList.toggle('current', at === current));
 		thumbs.elem.children[current]?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 	};
@@ -140,7 +140,7 @@ const Readme = styled(
 	`,
 );
 
-export const aboutDialog = async (game, onChanged, { canPhotograph = false } = {}) => {
+export const aboutDialog = async (game, onChanged, { canPhotograph = false, canChooseCover = false } = {}) => {
 	const body = new Component({ textContent: 'Loading…' });
 	let cover = game.about.cover?.path;
 
@@ -162,16 +162,18 @@ export const aboutDialog = async (game, onChanged, { canPhotograph = false } = {
 				media.length > 0 &&
 					gallery(media, {
 						cover,
-						onCover: async picture => {
-							const saved = await editGame(game.id, { cover: picture });
+						onCover:
+							canChooseCover &&
+							(async picture => {
+								const saved = await editGame(game.id, { cover: picture });
 
-							if (saved.ok) {
-								cover = picture;
-								onChanged?.();
-							}
+								if (saved.ok) {
+									cover = picture;
+									onChanged?.();
+								}
 
-							return saved.ok;
-						},
+								return saved.ok;
+							}),
 					}).elem,
 				markdown && new Readme({ md: markdown }).elem,
 			].filter(Boolean),

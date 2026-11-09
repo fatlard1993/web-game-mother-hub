@@ -4,6 +4,10 @@ One page for the house's web games: which are running, and a switch to turn each
 
 Games run on the htpc. Opening one to the internet carries it out through the VPS: an SSH tunnel from the htpc, and Caddy on the VPS facing the internet. Closing it takes the tunnel down, and nothing of the game is reachable from outside.
 
+## Who can do what
+
+Anyone on the LAN finds the games without logging in: each one's card, whether it's up, who's playing, a **Play** link, its About page, and, while it's open to the internet, its public address to share. Running them takes the admin password (the **Admin** button): turning them on and off, restarting, updating, resetting, opening them to the internet, their settings and logs, adding and forgetting games, and choosing covers. The server enforces it: a player's view of a game carries no folders, save files, git state or command output, and every change asks for the admin.
+
 ## Setup
 
 The hub lives on the htpc beside the games, and [dotfiles](https://github.com/fatlard1993/dotfiles)' `htpc` profile sets it up with the rest: `profiles/htpc/dot-update.d/mother-hub` clones it to `~/Projects/web-game-mother-hub` and runs it as `bun-server@web-game-mother-hub`, the template unit the games run as, and `lan-names` serves it at `https://hub.home`. Its settings come from the environment, in `~/.config/web-game-mother-hub.env`, which priv-config keeps:
