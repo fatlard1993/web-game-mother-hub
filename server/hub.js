@@ -56,6 +56,8 @@ export const createHub = ({
 	lanUrl = () => null,
 	// The port the LAN's name `<name>.home` is given to, if it's given to anything
 	lanNamePort = () => null,
+	// The hub's own port, which is never a game's to open to the internet
+	selfPort = null,
 	// Where this machine keeps its LAN names, and what makes them names (both optional)
 	lanNames = {},
 	hubDir,
@@ -98,6 +100,8 @@ export const createHub = ({
 	const checkPort = (port, id) => {
 		if (!Number.isInteger(port) || port < 1024 || port > 65535)
 			throw new ValidationError('A port is a whole number from 1024 to 65535');
+
+		if (port === selfPort) throw new ValidationError(`Port ${port} is the hub's own`);
 
 		const holder = Object.values(games()).find(record => record.port === port && record.id !== id);
 
@@ -375,10 +379,23 @@ export const createHub = ({
 			// A game hosted from paude's arcade has nothing to pull from (paude sends it); what's there is built
 			const { code: tracking } = await run(['git', '-C', record.dir, 'rev-parse', '--abbrev-ref', '@{u}']);
 
+			const before = (await gitOut(record, 'rev-parse', 'HEAD')) ?? null;
+
 			if (tracking === 0) await step(log, ['git', 'pull', '--ff-only'], record.dir);
 			else log('No upstream to pull from; building what is here');
 
-			await build(record, log);
+			try {
+				await build(record, log);
+			} catch (error) {
+				// A pull whose install or build failed is taken back, so the next restart doesn't run new code on old
+				// dependencies and the card still says the update is waiting. --keep won't touch local edits.
+				if (tracking === 0 && before) {
+					log(`Taking the pull back to ${before.slice(0, 7)}`);
+					await run(['git', '-C', record.dir, 'reset', '--keep', before]);
+				}
+
+				throw error;
+			}
 
 			if ((await units.state(gameUnit(id))).active) {
 				log('Restarting');
@@ -630,7 +647,15 @@ export const createHub = ({
 
 		edit: async (id, changes) => {
 			const record = game(id);
+
+			// An operation holds the game's record (an expose marks it open); changing it underneath would lose that
+			if (operations.get(id)?.running) throw new BusyError(`${record.name} is busy: ${operations.get(id).kind}`);
+
 			const next = { ...record, ...pick(changes, ['name', 'port', 'databases', 'cover', 'autoUpdate']) };
+			const { title } = await readLook(record);
+
+			// An empty name hands the name back to the game's own manifest
+			if (changes.name !== undefined && !String(changes.name).trim()) next.name = title ?? record.name;
 
 			if (typeof (next.autoUpdate ?? false) !== 'boolean') throw new ValidationError('Auto-update is on or off');
 
@@ -646,22 +671,23 @@ export const createHub = ({
 
 			const portChanged = next.port !== record.port;
 
-			// Only a name sent and different from the game's own makes it the hub's; a change of port or cover leaves it
-			const renamed =
-				record.renamed || (changes.name !== undefined && next.name.trim() !== (await readLook(record)).title);
+			// A name sent and different from the game's own makes it the hub's; an empty or matching one gives it back;
+			// a change of port or cover leaves it as it was
+			const renamed = changes.name === undefined ? !!record.renamed : next.name.trim() !== title;
 
-			games()[id] = { ...next, name: next.name.trim(), renamed };
+			Object.assign(record, next, { name: next.name.trim(), renamed });
 			await db.write();
 
 			// The running unit still has the old port in it; a fresh start writes the new one
 			if (portChanged && (await units.state(gameUnit(id))).active) {
-				await startGame(games()[id], () => {});
-				if (record.exposed) await startTunnel(games()[id], () => {});
-				// A game the hub named has its name follow it to the new port
-				if (record.hosted === 'paude') await nameOnLan(games()[id], () => {});
+				await startGame(record, () => {});
+				if (record.exposed) await startTunnel(record, () => {});
 			}
 
-			return status(games()[id]);
+			// A game the hub named has its name follow it to the new port
+			if (portChanged && record.hosted === 'paude') await nameOnLan(record, () => {});
+
+			return status(record);
 		},
 
 		forget: async id => {
@@ -746,6 +772,14 @@ export const createHub = ({
 			operate(id, 'expose', async (record, log) => {
 				if (!exposure.sshHost || !exposure.publicHost)
 					throw new Error('Exposing needs the VPS: give the hub MOTHER_HUB_VPS_HOST and MOTHER_HUB_PUBLIC_HOST');
+
+				// Only the game's own port goes out: never the hub's, nor one the LAN names for something else
+				const namedFor = lanUrl(record.port) && new URL(lanUrl(record.port)).hostname.replace(/\.home$/, '');
+
+				if (record.port === selfPort || (namedFor && namedFor !== record.id && lanNamePort(record.id) !== record.port))
+					throw new Error(
+						`Port ${record.port} is ${namedFor ? `${namedFor}.home's` : "the hub's"}, not ${record.name}'s`,
+					);
 
 				if (!record.exposeSlot) {
 					const taken = new Set(Object.values(games()).map(other => other.exposeSlot));

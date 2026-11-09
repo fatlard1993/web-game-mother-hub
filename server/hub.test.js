@@ -911,3 +911,74 @@ describe('hosting, kept to its word', () => {
 		expect(units.calls.filter(([verb]) => verb === 'restart')).toHaveLength(0);
 	});
 });
+
+describe('changes that keep the hub honest', () => {
+	test("an update whose build fails takes its pull back, so it's still waiting and nothing runs half-new", async () => {
+		const ran = [];
+		const run = async argv => {
+			ran.push(argv.join(' '));
+			if (argv.includes('build')) return { code: 1, output: '' };
+
+			return { code: 0, output: argv.at(-1) === 'HEAD' ? 'old1234567' : '' };
+		};
+		const { hub } = setup({ run });
+		const { id } = await hub.add({ dir: await makeGame('game') });
+
+		const operation = await hub.update(id).done;
+
+		expect(operation.ok).toBe(false);
+		expect(ran.some(command => command.endsWith('reset --keep old1234567'))).toBe(true);
+	});
+
+	test('settings wait for a running operation, and an empty name gives the name back to the game', async () => {
+		let finish;
+		const run = argv =>
+			argv[1] === 'pull'
+				? new Promise(resolve => (finish = () => resolve({ code: 0, output: '' })))
+				: { code: 0, output: '' };
+		const { hub } = setup({ run });
+		const dir = await makeGame('dino');
+
+		await mkdir(path.join(dir, 'client'));
+		await writeFile(path.join(dir, 'client/manifest.json'), JSON.stringify({ name: 'Dino Dash' }));
+
+		const { id } = await hub.add({ dir });
+		const { done } = hub.update(id);
+
+		await expect(hub.edit(id, { name: 'Sunday Dinos' })).rejects.toThrow('is busy');
+		while (!finish) await Bun.sleep(1);
+		finish();
+		await done;
+
+		expect((await hub.edit(id, { name: 'Sunday Dinos' })).name).toBe('Sunday Dinos');
+		expect((await hub.edit(id, { name: '' })).name).toBe('Dino Dash');
+
+		await writeFile(path.join(dir, 'client/manifest.json'), JSON.stringify({ name: 'Dino Dash 2' }));
+		expect((await hub.get(id)).name).toBe('Dino Dash 2');
+	});
+
+	test("opening to the internet takes only a game's own port, never the hub's or one named for something else", async () => {
+		const units = fakeUnits();
+		const hub = createHub({
+			db: fakeDb(),
+			units,
+			run: async () => ({ code: 0, output: '' }),
+			probe: async () => ({ ok: true }),
+			projectsRoot: root,
+			lanUrl: port => ({ 8044: 'https://arcade.home', 4100: 'https://sand.home' })[port] ?? null,
+			lanNamePort: name => ({ arcade: 8044, sand: 4100 })[name] ?? null,
+			selfPort: 8036,
+			resetsDir: path.join(root, 'resets'),
+			exposure: { sshHost: 'vps', publicHost: 'games.example', publicPortBase: 9100, tunnelPortBase: 19100, slots: 4 },
+			bun: 'bun',
+			hubDir: root,
+		});
+		const hubPort = await hub.add({ dir: await makeGame('sneaky'), port: 8036 }).catch(error => error);
+		const arcade = await hub.add({ dir: await makeGame('cards'), port: 8044 });
+		const sand = await hub.add({ dir: await makeGame('sand'), port: 4100 });
+
+		expect(hubPort).toBeInstanceOf(Error);
+		expect((await hub.expose(arcade.id).done).error).toContain("arcade.home's");
+		expect((await hub.expose(sand.id).done).ok).toBe(true);
+	});
+});

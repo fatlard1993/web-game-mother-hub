@@ -151,6 +151,7 @@ const hub = createHub({
 	selfId: path.basename(hubDir),
 	lanUrl,
 	lanNamePort,
+	selfPort: options.port,
 	hubDir,
 	resetsDir: path.join(path.dirname(db.path), '.web-game-mother-hub-resets'),
 	exposure: {
