@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, statSync } from 'fs';
-import { mkdir, rename, writeFile } from 'fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'fs/promises';
 import path from 'path';
 
 import { ValidationError } from '@vanilla-bean/components/app';
@@ -38,6 +38,10 @@ class NotFoundError extends Error {
 	status = 404;
 }
 
+class GoneError extends Error {
+	status = 410;
+}
+
 // What the hub does to games: keeps the list, starts and stops them, updates, resets and exposes them, and says how
 // each one is doing. Everything it touches outside its database goes through units (systemd), run (commands) and
 // probe (HTTP), so tests hand it fakes.
@@ -50,6 +54,8 @@ export const createHub = ({
 	projectsRoot,
 	selfId = null,
 	lanUrl = () => null,
+	// The port the LAN's name `<name>.home` is given to, if it's given to anything
+	lanNamePort = () => null,
 	// Where this machine keeps its LAN names, and what makes them names (both optional)
 	lanNames = {},
 	hubDir,
@@ -63,6 +69,11 @@ export const createHub = ({
 	const games = () => db.data.games;
 	// Games forgotten here, which looking through the units mustn't bring back
 	const ignored = () => (db.data.ignored ||= []);
+	// Games paude hosted that were forgotten here: paude is refused them until it hosts one again on purpose
+	const forgottenHosted = () => (db.data.forgottenHosted ||= []);
+	// The operation under way on a game, to its end
+	const finishing = new Map();
+	const waitFor = id => finishing.get(id);
 	const operations = new Map();
 	// Why a game meant to update itself hasn't yet, while that's so: someone's playing it
 	const updateWaiting = new Map();
@@ -136,6 +147,8 @@ export const createHub = ({
 
 			return operation;
 		})();
+
+		finishing.set(id, done);
 
 		return { operation, done };
 	};
@@ -377,37 +390,58 @@ export const createHub = ({
 
 	// A game's name on the LAN, where the machine has one to give (dotfiles' lan-names on the htpc): a `name=port` file
 	// in the names folder, and the command that makes them names
+	// Rewriting the names restarts the house's DNS, so it's done only when this game's name or port is new
 	const nameOnLan = async (record, log) => {
 		if (!lanNames.dir) return;
 
+		const file = path.join(lanNames.dir, `${record.id}.conf`);
+		const line = `${record.id}=${record.port}\n`;
+
+		if ((await readFile(file, 'utf8').catch(() => null)) === line) return;
+
 		await mkdir(lanNames.dir, { recursive: true });
-		await writeFile(path.join(lanNames.dir, `${record.id}.conf`), `${record.id}=${record.port}\n`);
+		await writeFile(file, line);
+
+		if (lanNames.refresh) await step(log, ['sh', '-c', lanNames.refresh], hubDir);
+	};
+
+	const dropLanName = async (record, log) => {
+		if (!lanNames.dir || !existsSync(path.join(lanNames.dir, `${record.id}.conf`))) return;
+
+		await rm(path.join(lanNames.dir, `${record.id}.conf`), { force: true });
 
 		if (lanNames.refresh) await step(log, ['sh', '-c', lanNames.refresh], hubDir);
 	};
 
 	// Built, started (or restarted), and named: what hosting does with a game's folder once it's here
-	const hostHere = (record, log) =>
-		(async () => {
-			await build(record, log);
+	const hostHere = async (record, log) => {
+		await build(record, log);
 
-			if ((await units.state(gameUnit(record.id))).active) {
-				log('Restarting');
-				await units.restart(gameUnit(record.id));
-			} else await startGame(record, log);
+		if ((await units.state(gameUnit(record.id))).active) {
+			log('Restarting');
+			await units.restart(gameUnit(record.id));
+		} else await startGame(record, log);
 
-			await nameOnLan(record, log);
-			log('✓ Hosted');
-		})();
+		await nameOnLan(record, log);
+		log('✓ Hosted');
+	};
 
-	// Asked to wait for an idle game (paude keeping a game current as it's built), one with players gets its new code
-	// but not the rebuild and restart: those wait for the players to go, or the night's round
-	const playing = async record =>
-		(await units.state(gameUnit(record.id))).active &&
-		(await probe(`http://127.0.0.1:${record.port}${STATUS_PATH}`, HEALTH_TIMEOUT_MS)).report?.connections > 0;
+	// Whether anyone's on a game: what it says of itself (a framework game's status), or else the connections open to
+	// its port, so a game that doesn't report (game-night) isn't taken for empty
+	const playing = async record => {
+		if (!(await units.state(gameUnit(record.id))).active) return false;
 
+		const { report } = await probe(`http://127.0.0.1:${record.port}${STATUS_PATH}`, HEALTH_TIMEOUT_MS);
+
+		return report ? report.connections > 0 : (await units.connectionsTo(record.port)) > 0;
+	};
+
+	// Hosting runs on after the answer, which says it began (or, asked to wait for an idle game that has players, that
+	// it's waiting: the new code is in, the rebuild and restart wait for them to go or the night's round). The caller
+	// follows the game's operation to see it end.
 	const hostFolder = async (id, target, { whenIdle = false } = {}) => {
 		const record = games()[id] ?? (await add(target).then(() => games()[id]));
+		const answer = { id, name: record.name, port: record.port, url: lanUrl(record.port) };
 
 		record.hosted = 'paude';
 
@@ -416,19 +450,29 @@ export const createHub = ({
 			updateWaiting.set(id, 'players');
 			await db.write();
 
-			return { id, name: record.name, port: record.port, url: lanUrl(record.port), deferred: true, lines: [] };
+			return { ...answer, deferred: true };
 		}
 
 		record.pendingHost = false;
 		await db.write();
 
-		const { operation, done } = operate(id, 'host', (current, log) => hostHere(current, log));
+		const { operation } = operate(id, 'host', (current, log) => hostHere(current, log));
 
-		await done;
+		return { ...answer, operation: { kind: operation.kind, startedAt: operation.startedAt } };
+	};
 
-		if (!operation.ok) throw new ValidationError(`Hosting ${record.name} failed: ${operation.error}`);
+	// What hosting refuses: a name the house already gives something else (hub.home, arcade.home), and a game that
+	// was forgotten here, until it's hosted again on purpose
+	const refuseToHost = (id, again) => {
+		const takenPort = lanNamePort(id);
 
-		return { id, name: record.name, port: record.port, url: lanUrl(record.port), lines: operation.lines };
+		if (id === selfId || (takenPort && takenPort !== games()[id]?.port))
+			throw new ValidationError(`${id}.home is already the house's; name the game something else`);
+
+		if (forgottenHosted().includes(id) && !again)
+			throw new GoneError(`${id} was forgotten in the mother hub; host it again on purpose to bring it back`);
+
+		if (again) db.data.forgottenHosted = forgottenHosted().filter(each => each !== id);
 	};
 
 	const gitOut = async (record, ...argv) => {
@@ -450,7 +494,9 @@ export const createHub = ({
 				if (await playing(record)) continue;
 
 				updateWaiting.delete(record.id);
-				await hostFolder(record.id, record.dir).catch(error => console.error(`Hosting ${record.id} failed`, error));
+				await hostFolder(record.id, record.dir)
+					.then(answer => answer.operation && operations.get(record.id) && waitFor(record.id))
+					.catch(error => console.error(`Hosting ${record.id} failed`, error));
 				continue;
 			}
 
@@ -469,16 +515,24 @@ export const createHub = ({
 				continue;
 			}
 
-			const { report } = await probe(`http://127.0.0.1:${record.port}${STATUS_PATH}`, HEALTH_TIMEOUT_MS);
-
-			if (report?.connections > 0) {
+			if (await playing(record)) {
 				updateWaiting.set(record.id, 'players');
 				continue;
 			}
 
 			updateWaiting.delete(record.id);
 
-			const operation = await update(record.id).done;
+			// Someone pressed something on this game while the round was looking at it: theirs goes first
+			let started;
+
+			try {
+				started = update(record.id);
+			} catch (error) {
+				if (error instanceof BusyError) continue;
+				throw error;
+			}
+
+			const operation = await started.done;
 
 			record.autoUpdateFailedAt = operation.ok ? null : target;
 			await db.write();
@@ -492,9 +546,11 @@ export const createHub = ({
 
 		// paude's arcade putting a game with the house's: hosted in place when the hub sees the same repo at the same
 		// commit (the same machine), and otherwise asking for it as a git bundle (hostBundle), which works from anywhere
-		host: async ({ name, dir, head, whenIdle = false }) => {
+		host: async ({ name, dir, head, whenIdle = false, again = false }) => {
 			const id = hostedName(name);
 			const target = path.join(projectsRoot, id);
+
+			refuseToHost(id, again);
 			const here =
 				dir &&
 				path.resolve(dir) === target &&
@@ -507,10 +563,14 @@ export const createHub = ({
 		},
 
 		// The game's repo as a bundle: cloned into the projects folder the first time, brought forward after
-		hostBundle: async (name, bundleFile, { whenIdle = false } = {}) => {
+		hostBundle: async (name, bundleFile, { whenIdle = false, again = false } = {}) => {
 			const id = hostedName(name);
 			const target = path.join(projectsRoot, id);
 			const record = games()[id];
+			// A game forgotten here and hosted again on purpose finds its old folder still its own
+			const wasHosted = record?.hosted === 'paude' || (again && forgottenHosted().includes(id));
+
+			refuseToHost(id, again);
 
 			if (!existsSync(target)) {
 				const { code, output } = await run(['git', 'clone', '--quiet', bundleFile, target]);
@@ -518,7 +578,7 @@ export const createHub = ({
 				if (code !== 0) throw new ValidationError(`The game couldn't be unpacked: ${output}`);
 				// The bundle is gone once this is done; the game's next version comes the same way
 				await run(['git', '-C', target, 'remote', 'remove', 'origin']);
-			} else if (record?.hosted !== 'paude') {
+			} else if (!wasHosted) {
 				throw new ValidationError(`${target} is already here, and isn't a game paude hosted`);
 			} else {
 				const fetched = await run(['git', '-C', target, 'fetch', '--quiet', bundleFile, 'HEAD']);
@@ -597,6 +657,8 @@ export const createHub = ({
 			if (portChanged && (await units.state(gameUnit(id))).active) {
 				await startGame(games()[id], () => {});
 				if (record.exposed) await startTunnel(games()[id], () => {});
+				// A game the hub named has its name follow it to the new port
+				if (record.hosted === 'paude') await nameOnLan(games()[id], () => {});
 			}
 
 			return status(games()[id]);
@@ -607,9 +669,16 @@ export const createHub = ({
 
 			if (operations.get(id)?.running) throw new BusyError(`${record.name} is busy`);
 
-			// Its tunnel was the hub's; its bun-server@ unit is dotfiles', and stays as it is, on or off
+			// Its tunnel was the hub's. A game paude hosted is the hub's too: it's stopped, its name taken back, and
+			// paude told not to host it again. A house game's bun-server@ unit is dotfiles', and stays as it is.
 			await units.removeTunnel(tunnelUnit(id));
 			await shots?.forget(id);
+
+			if (record.hosted === 'paude') {
+				await units.stop(gameUnit(id));
+				await dropLanName(record, () => {});
+				forgottenHosted().push(id);
+			}
 
 			ignored().push(id);
 			delete games()[id];

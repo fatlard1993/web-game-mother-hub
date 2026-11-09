@@ -91,29 +91,36 @@ const auth = await createAuth({
 
 const home = file => (file?.startsWith('~/') ? path.join(os.homedir(), file.slice(2)) : file);
 
-// The LAN's names for what this machine serves, read again when the file changes (lan-names regenerates it)
-let lanNames = { at: 0, urls: new Map() };
+// The LAN's names for what this machine serves, read again when the file changes (lan-names regenerates it): each
+// port's address, and each name's port
+let lanNames = { at: 0, urls: new Map(), ports: new Map() };
 
-const lanUrl = port => {
-	const changed = (() => {
-		try {
-			return statSync(options['lan-names']).mtimeMs;
-		} catch {
-			return 0;
-		}
-	})();
+const readLanNames = () => {
+	let changed = 0;
+
+	try {
+		changed = statSync(options['lan-names']).mtimeMs;
+	} catch {
+		// No names on this machine
+	}
 
 	if (changed !== lanNames.at) {
-		const text = changed ? readFileSync(options['lan-names'], 'utf8') : '';
+		const entries = [
+			...(changed ? readFileSync(options['lan-names'], 'utf8') : '').matchAll(/^(\d+)\s+(https?:\/\/\S+)$/gm),
+		];
 
 		lanNames = {
 			at: changed,
-			urls: new Map([...text.matchAll(/^(\d+)\s+(https?:\/\/\S+)$/gm)].map(([, at, url]) => [Number(at), url])),
+			urls: new Map(entries.map(([, at, url]) => [Number(at), url])),
+			ports: new Map(entries.map(([, at, url]) => [new URL(url).hostname.replace(/\.home$/, ''), Number(at)])),
 		};
 	}
 
-	return lanNames.urls.get(port) ?? null;
+	return lanNames;
 };
+
+const lanUrl = port => readLanNames().urls.get(port) ?? null;
+const lanNamePort = name => readLanNames().ports.get(name) ?? null;
 
 const hubDir = path.resolve(import.meta.dir, '..');
 
@@ -143,6 +150,7 @@ const hub = createHub({
 	// The hub runs as bun-server@<its folder> on the htpc, and isn't one of the games
 	selfId: path.basename(hubDir),
 	lanUrl,
+	lanNamePort,
 	hubDir,
 	resetsDir: path.join(path.dirname(db.path), '.web-game-mother-hub-resets'),
 	exposure: {

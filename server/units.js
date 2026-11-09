@@ -163,6 +163,13 @@ export const createUnits = ({
 		return [...output.matchAll(/^bun-server@([\w.-]+)\.service/gm)].map(match => match[1]);
 	};
 
+	// The connections open to a port right now: players on a game that doesn't say how many it has
+	const connectionsTo = async port => {
+		const { output } = await run(['ss', '-tnH', 'state', 'established', `( sport = :${port} )`]);
+
+		return output.split('\n').filter(line => line.trim()).length;
+	};
+
 	const logs = async (name, lines = 200) =>
 		(await run(['journalctl', '--user', '-u', name, '-n', String(lines), '--no-pager', '-o', 'short-iso'])).output;
 
@@ -176,6 +183,7 @@ export const createUnits = ({
 		restart,
 		removeTunnel,
 		instances,
+		connectionsTo,
 		logs,
 	};
 };

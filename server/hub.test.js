@@ -42,6 +42,7 @@ const fakeUnits = () => {
 			return this.listening.get(name) ?? null;
 		},
 		instances: async () => known,
+		connectionsTo: async () => 0,
 		startGame: async (id, settings) => {
 			calls.push(['start', `bun-server@${id}`, settings]);
 			units.set(`bun-server@${id}`, { active: true, settings });
@@ -80,6 +81,13 @@ const makeGame = async (name, { scaffold = false, scripts = {}, description } = 
 	);
 
 	return dir;
+};
+
+// Hosting answers when it's begun; this waits for the game's operation to end
+const settled = async (hub, id) => {
+	for (let tries = 0; tries < 200 && (await hub.get(id)).operation?.running; tries++) await Bun.sleep(5);
+
+	return (await hub.get(id)).operation;
 };
 
 const setup = ({ run = async () => ({ code: 0, output: '' }), exposure = {}, shots = null } = {}) => {
@@ -619,6 +627,7 @@ describe('updating by itself', () => {
 		});
 		const { id } = await hub.add({ dir: await makeGame('busy') });
 
+		await hub.turnOn(id).done;
 		await hub.edit(id, { autoUpdate: true });
 		await hub.autoUpdateRound();
 
@@ -763,7 +772,8 @@ describe('hosting for paude', () => {
 
 		const hosted = await hub.host({ name: 'sand', dir, head: 'abc' });
 
-		expect(hosted).toMatchObject({ id: 'sand', port: 4100 });
+		expect(hosted).toMatchObject({ id: 'sand', port: 4100, operation: { kind: 'host' } });
+		expect(await settled(hub, 'sand')).toMatchObject({ ok: true });
 		expect(units.units.get('bun-server@sand').active).toBe(true);
 		expect(await Bun.file(path.join(lanDir, 'sand.conf')).text()).toBe('sand=4100\n');
 		expect(ran).toContain('sh -c refresh-names');
@@ -778,6 +788,7 @@ describe('hosting for paude', () => {
 		});
 
 		await hub.hostBundle('sand', await bundleOf(dir));
+		await settled(hub, 'sand');
 
 		expect(await gitIn(path.join(root, 'sand'), 'rev-parse', 'HEAD')).toBe(await gitIn(dir, 'rev-parse', 'HEAD'));
 		expect(units.units.get('bun-server@sand').active).toBe(true);
@@ -786,6 +797,7 @@ describe('hosting for paude', () => {
 		await realGit(['git', '-C', dir, 'add', '-A']);
 		await realGit(['git', '-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'three']);
 		await hub.hostBundle('sand', await bundleOf(dir));
+		await settled(hub, 'sand');
 
 		expect(await gitIn(path.join(root, 'sand'), 'log', '-1', '--format=%s')).toBe('three');
 
@@ -812,6 +824,7 @@ test("hosting asked to wait for an idle game holds the rebuild while someone pla
 	const dir = await makeGame('sand', { scaffold: true });
 
 	await hub.host({ name: 'sand', dir, head: 'abc' });
+	await settled(hub, 'sand');
 	ran.length = 0;
 
 	expect(await hub.host({ name: 'sand', dir, head: 'abc', whenIdle: true })).toMatchObject({ deferred: true });
@@ -823,4 +836,78 @@ test("hosting asked to wait for an idle game holds the rebuild while someone pla
 
 	expect(ran.filter(command => command.startsWith('bun'))).toEqual(['bun install', 'bun run build']);
 	expect((await hub.get('sand')).pendingHost).toBe(false);
+});
+
+describe('hosting, kept to its word', () => {
+	const hostingHub = ({ lanDir, lanNamePort = () => null, connections = 0, reports = true } = {}) => {
+		const units = fakeUnits();
+		const ran = [];
+
+		units.connectionsTo = async () => connections;
+
+		const hub = createHub({
+			db: fakeDb(),
+			units,
+			run: async argv => (ran.push(argv.join(' ')), { code: 0, output: argv.includes('HEAD') ? 'abc' : '' }),
+			probe: async () => ({ ok: true, report: reports ? { connections } : null }),
+			projectsRoot: root,
+			lanNames: lanDir ? { dir: lanDir, refresh: 'refresh-names' } : {},
+			lanNamePort,
+			selfId: 'web-game-mother-hub',
+			resetsDir: path.join(root, 'resets'),
+			exposure: {},
+			bun: 'bun',
+			hubDir: root,
+		});
+
+		return { hub, units, ran };
+	};
+
+	test('a forgotten hosted game is stopped, its name taken back, and refused until hosted again on purpose', async () => {
+		const lanDir = path.join(root, 'lan-names.d');
+		const { hub, units } = hostingHub({ lanDir });
+		const dir = await makeGame('sand', { scaffold: true });
+
+		await hub.host({ name: 'sand', dir, head: 'abc' });
+		await settled(hub, 'sand');
+		await hub.forget('sand');
+
+		expect(units.units.get('bun-server@sand').active).toBe(false);
+		expect(existsSync(path.join(lanDir, 'sand.conf'))).toBe(false);
+		await expect(hub.host({ name: 'sand', dir, head: 'abc' })).rejects.toThrow('was forgotten in the mother hub');
+
+		await hub.host({ name: 'sand', dir, head: 'abc', again: true });
+		expect(await settled(hub, 'sand')).toMatchObject({ kind: 'host', ok: true });
+	});
+
+	test("a game can't take a name the house already gives something else", async () => {
+		const { hub } = hostingHub({ lanNamePort: name => ({ hub: 8036, arcade: 8044 })[name] ?? null });
+
+		for (const name of ['hub', 'arcade', 'web-game-mother-hub'])
+			await expect(hub.host({ name, dir: await makeGame(name), head: 'abc' })).rejects.toThrow('already the house');
+	});
+
+	test('hosting the same game again leaves the LAN names (and the DNS) alone', async () => {
+		const lanDir = path.join(root, 'lan-names.d');
+		const { hub, ran } = hostingHub({ lanDir });
+		const dir = await makeGame('sand', { scaffold: true });
+
+		await hub.host({ name: 'sand', dir, head: 'abc' });
+		await settled(hub, 'sand');
+		await hub.host({ name: 'sand', dir, head: 'abc' });
+		await settled(hub, 'sand');
+
+		expect(ran.filter(command => command === 'sh -c refresh-names')).toHaveLength(1);
+	});
+
+	test("a game that doesn't say how many are playing counts its open connections", async () => {
+		const { hub, units } = hostingHub({ connections: 2, reports: false });
+		const dir = await makeGame('night', { scaffold: true });
+
+		await hub.host({ name: 'night', dir, head: 'abc' });
+		await settled(hub, 'night');
+
+		expect(await hub.host({ name: 'night', dir, head: 'abc', whenIdle: true })).toMatchObject({ deferred: true });
+		expect(units.calls.filter(([verb]) => verb === 'restart')).toHaveLength(0);
+	});
 });
