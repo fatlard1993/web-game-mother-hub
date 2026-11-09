@@ -1,12 +1,11 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'crypto';
 
 const COOKIE_NAME = 'motherHubSession';
 const SESSION_DAYS = 30;
 
-// Everything here can stop a game or open one to the internet, so every request but the login itself needs the
-// password. It lives only as an argon2 hash, the signing secret only in the database, both made on first boot.
-// The token is how paude, on this machine or another, hosts games here (POST /api/host): a shared secret, sent as a
-// bearer header, so keep it as close as the password
+// The admin: whoever has the password (a session cookie) or the token (a bearer header). The password lives only as an
+// argon2 hash, the signing secret only in the database, both made on first boot. The token is what paude hosts with,
+// from this machine or another, and it is the whole admin, not only hosting: keep it as close as the password.
 export const createAuth = async ({ db, password, token = null }) => {
 	const stored = (db.data.auth ||= {});
 
@@ -60,9 +59,13 @@ export const createAuth = async ({ db, password, token = null }) => {
 		return null;
 	};
 
-	// SameSite=Strict keeps another site's fetch from riding along; Secure is left off, since this serves plain http
-	// on the LAN
-	const cookie = (value, maxAge) => `${COOKIE_NAME}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}`;
+	// SameSite=Strict keeps another site's fetch from riding along; Secure, when the page came over https (hub.home,
+	// through Caddy), keeps the browser from ever sending it in the clear
+	const cookie = (value, maxAge, secure) =>
+		`${COOKIE_NAME}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${secure ? '; Secure' : ''}`;
+
+	// Compared as digests, so neither the token's length nor its bytes show in how long a wrong one takes
+	const digest = text => createHash('sha256').update(String(text)).digest();
 
 	return {
 		isLoggedIn: request => {
@@ -70,19 +73,14 @@ export const createAuth = async ({ db, password, token = null }) => {
 
 			const bearer = /^Bearer (.+)$/.exec(request.headers.get('authorization') ?? '')?.[1];
 
-			return (
-				!!token &&
-				!!bearer &&
-				bearer.length === token.length &&
-				timingSafeEqual(Buffer.from(bearer), Buffer.from(token))
-			);
+			return !!token && !!bearer && timingSafeEqual(digest(bearer), digest(token));
 		},
 		checkPassword: async candidate => Bun.password.verify(String(candidate ?? ''), stored.passwordHash),
-		sessionCookie: () => {
+		sessionCookie: ({ secure = false } = {}) => {
 			const expiry = Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000;
 
-			return cookie(`${expiry}.${sign(expiry)}`, SESSION_DAYS * 24 * 60 * 60);
+			return cookie(`${expiry}.${sign(expiry)}`, SESSION_DAYS * 24 * 60 * 60, secure);
 		},
-		clearedCookie: () => cookie('', 0),
+		clearedCookie: ({ secure = false } = {}) => cookie('', 0, secure),
 	};
 };

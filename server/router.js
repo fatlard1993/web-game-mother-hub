@@ -20,6 +20,20 @@ const failureCount = address => {
 	return entry && Date.now() - entry.at < FORGET_AFTER_MS ? entry.count : 0;
 };
 
+const LOOPBACK = ['127.0.0.1', '::1', '::ffff:127.0.0.1'];
+
+// Who's asking: behind Caddy every request comes from loopback, so there the address Caddy saw is the one that counts.
+// Only a loopback caller is taken at its word about that; anyone else could write the header themselves.
+const clientAddress = (request, server) => {
+	const direct = server?.requestIP(request)?.address || 'unknown';
+	const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
+
+	return LOOPBACK.includes(direct) && forwarded ? forwarded : direct;
+};
+
+const overHttps = request =>
+	request.headers.get('x-forwarded-proto') === 'https' || new URL(request.url).protocol === 'https:';
+
 const jsonObject = async request => {
 	const body = await request.json();
 
@@ -38,25 +52,30 @@ export const createRouter = ({ hub, auth, projectsRoot, pageRoot = 'client/build
 		}
 
 		if (requestMatch('POST', '/api/session', request)) {
-			const address = server?.requestIP(request)?.address || 'unknown';
+			const address = clientAddress(request, server);
+			// Counted before the password is checked, so guesses sent all at once each wait their turn's delay
+			const attempt = failureCount(address);
 
-			await Bun.sleep(Math.min(250 * 2 ** failureCount(address) - 250, MAX_PENALTY_MS));
+			failures.set(address, { count: attempt + 1, at: Date.now() });
+			await Bun.sleep(Math.min(250 * 2 ** attempt - 250, MAX_PENALTY_MS));
 
 			const { password } = await jsonObject(request);
 
-			if (!(await auth.checkPassword(password))) {
-				failures.set(address, { count: failureCount(address) + 1, at: Date.now() });
-
-				return Response.json({ error: 'Wrong password' }, { status: 401 });
-			}
+			if (!(await auth.checkPassword(password))) return Response.json({ error: 'Wrong password' }, { status: 401 });
 
 			failures.delete(address);
 
-			return new Response(null, { status: 204, headers: { 'Set-Cookie': auth.sessionCookie() } });
+			return new Response(null, {
+				status: 204,
+				headers: { 'Set-Cookie': auth.sessionCookie({ secure: overHttps(request) }) },
+			});
 		}
 
 		if (requestMatch('DELETE', '/api/session', request))
-			return new Response(null, { status: 204, headers: { 'Set-Cookie': auth.clearedCookie() } });
+			return new Response(null, {
+				status: 204,
+				headers: { 'Set-Cookie': auth.clearedCookie({ secure: overHttps(request) }) },
+			});
 	};
 
 	const file = found => new Response(Bun.file(found), { headers: { 'cache-control': 'private, max-age=86400' } });

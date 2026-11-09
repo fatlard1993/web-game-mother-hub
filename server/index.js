@@ -23,6 +23,11 @@ const env = process.env;
 const { options } = new Argi({
 	options: {
 		port: { type: 'number', alias: 'p', defaultValue: Number(env.MOTHER_HUB_PORT) || 8036 },
+		host: {
+			type: 'string',
+			defaultValue: env.MOTHER_HUB_HOST || '127.0.0.1',
+			description: 'The address to listen on: loopback, behind Caddy (hub.home); 0.0.0.0 to answer the LAN directly',
+		},
 		database: {
 			type: 'string',
 			alias: 'd',
@@ -165,13 +170,14 @@ const hub = createHub({
 	},
 });
 
+if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(options['update-at']))
+	throw new Error('MOTHER_HUB_UPDATE_AT is HH:MM, as 04:00');
+
 await serve({
+	hostname: options.host,
 	port: options.port,
 	router: createRouter({ hub, auth, projectsRoot: options.projects, pageRoot: path.join(hubDir, 'client/build') }),
 });
-
-if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(options['update-at']))
-	throw new Error('MOTHER_HUB_UPDATE_AT is HH:MM, as 04:00');
 
 // A minute after starting, every game is fetched so its card's counts are right, but nothing's updated: that's the
 // night's to do

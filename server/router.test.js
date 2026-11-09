@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
 
 import { createAuth } from './auth';
 import { forPlayer, hubForPlayer } from './roles';
@@ -145,4 +145,52 @@ test("a game's install and build scripts get none of the hub's secrets", async (
 	});
 
 	expect(plain).toEqual({ PATH: '/bin', HOME: '/h' });
+});
+
+describe('logging in', () => {
+	const login = (
+		router,
+		{ password = 'nope', headers = {}, address = '127.0.0.1', url = 'http://hub/api/session' } = {},
+	) =>
+		router(
+			new Request(url, {
+				method: 'POST',
+				headers: { 'content-type': 'application/json', ...headers },
+				body: JSON.stringify({ password }),
+			}),
+			{ requestIP: () => ({ address }) },
+		);
+
+	test('over https (Caddy says so) the session cookie is Secure; over plain http it is not', async () => {
+		const { router } = await setup();
+		const secure = await login(router, { password: 'hunter2', headers: { 'x-forwarded-proto': 'https' } });
+		const plain = await login(router, { password: 'hunter2', address: '192.168.1.40' });
+
+		expect(secure.headers.get('set-cookie')).toContain('; Secure');
+		expect(plain.headers.get('set-cookie')).not.toContain('Secure');
+	});
+
+	test("behind Caddy each client has its own count of wrong guesses, and a stranger can't claim another's", async () => {
+		const { router } = await setup();
+		const timed = async options => {
+			const started = performance.now();
+
+			await login(router, options);
+
+			return performance.now() - started;
+		};
+		const guesser = { headers: { 'x-forwarded-for': '192.168.1.66' } };
+
+		await timed(guesser);
+		await timed(guesser);
+
+		// Both pay one password check; only the guesser's third try also waits out its two wrong ones (750ms)
+		const third = await timed(guesser);
+		const admin = await timed({ password: 'hunter2', headers: { 'x-forwarded-for': '192.168.1.20' } });
+		// A stranger (not loopback) naming the guesser in the header is still counted as itself
+		const stranger = await timed({ address: '192.168.1.99', headers: { 'x-forwarded-for': '192.168.1.66' } });
+
+		expect(third - admin).toBeGreaterThan(500);
+		expect(third - stranger).toBeGreaterThan(500);
+	});
 });
