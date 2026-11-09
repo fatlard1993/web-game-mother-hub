@@ -1,6 +1,7 @@
 import { Button, Component, Content, Dialog, EmptyState, Notify, Toolbar, styled } from '@vanilla-bean/components';
 
 import { closeAll, failure, getGames, getHub, logOut } from './api';
+import { aboutDialog } from './About';
 import { addDialog, logsDialog, settingsDialog } from './dialogs';
 import GameCard from './GameCard';
 
@@ -125,6 +126,7 @@ export default class Hub extends Component {
 				exposure: this.exposure,
 				onChanged: () => this.refresh(),
 				onLogs: logsDialog,
+				onAbout: about => aboutDialog(about, () => this.refresh()),
 				onSettings: () => settingsDialog(game, () => this.refresh()),
 			});
 

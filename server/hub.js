@@ -5,6 +5,7 @@ import path from 'path';
 import { ValidationError } from '@vanilla-bean/components/app';
 
 import { detectGame } from './detect';
+import { readDocs } from './docs';
 import { readLook } from './look';
 import { tunnelUnit } from './units';
 
@@ -149,13 +150,14 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 	};
 
 	const status = async record => {
-		const [unit, tunnel, answer, git, look] = await Promise.all([
+		const [unit, tunnel, answer, git, look, docs] = await Promise.all([
 			units.state(record.id),
 			record.exposeSlot ? units.state(tunnelUnit(record.id)) : null,
 			// Any answer at all means it's up; a game on the framework answers with how it's doing besides
 			probe(`http://127.0.0.1:${record.port}${STATUS_PATH}`, HEALTH_TIMEOUT_MS),
 			gitInfo(record),
 			readLook(record),
+			readDocs(record),
 		]);
 		const operation = operations.get(record.id);
 
@@ -168,6 +170,12 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 			health: { ok: answer.ok },
 			report: unit.active ? answer.report : null,
 			git,
+			about: {
+				blurb: docs.blurb,
+				cover: coverOf(docs.media, record.cover),
+				pictures: docs.media.length,
+				hasReadme: !!docs.markdown,
+			},
 			look: {
 				...look,
 				icon: look.icon ? `/api/games/${encodeURIComponent(record.id)}/icon?v=${look.iconVersion}` : null,
@@ -237,7 +245,9 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 
 		edit: async (id, changes) => {
 			const record = game(id);
-			const next = { ...record, ...pick(changes, ['name', 'port', 'databases']) };
+			const next = { ...record, ...pick(changes, ['name', 'port', 'databases', 'cover']) };
+
+			if (next.cover != null && typeof next.cover !== 'string') throw new ValidationError('A cover is a picture path');
 
 			if (typeof next.name !== 'string' || !next.name.trim()) throw new ValidationError('A game needs a name');
 			checkPort(next.port, id);
@@ -249,7 +259,9 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 
 			const portChanged = next.port !== record.port;
 
-			const renamed = record.renamed || next.name.trim() !== (await readLook(record)).title;
+			// Only a name sent and different from the game's own makes it the hub's; a change of port or cover leaves it
+			const renamed =
+				record.renamed || (changes.name !== undefined && next.name.trim() !== (await readLook(record)).title);
 
 			games()[id] = { ...next, name: next.name.trim(), renamed };
 			await db.write();
@@ -386,6 +398,15 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 		// The tunnel's lines follow the game's, for an exposed game: that's where the VPS says why it refused
 		icon: async id => (await readLook(game(id))).icon,
 
+		// The README, its pictures pointed at the hub, for the game's page
+		docs: async id => {
+			const { markdown, media } = await readDocs(game(id));
+
+			return { markdown, media: media.map(({ url, alt, path: file }) => ({ url, alt, path: file })) };
+		},
+
+		media: async (id, index) => (await readDocs(game(id))).media[index]?.file ?? null,
+
 		logs: async (id, lines) => {
 			const record = game(id);
 			const logs = await units.logs(id, lines);
@@ -395,6 +416,19 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 			return `${logs}\n\n── tunnel to the VPS ──\n${await units.logs(tunnelUnit(id), Math.min(lines, 50))}`;
 		},
 	};
+};
+
+// The card's cover: the picture chosen for it here, or else the first of the game being played (the house READMEs
+// caption those "Play: ..."), or else the first that isn't a logo, which is square and crops badly across a card
+const coverOf = (media, chosen) => {
+	const named = item => `${item.alt} ${path.basename(item.file)}`;
+	const picture =
+		media.find(item => item.path === chosen) ??
+		media.find(item => /^play\b/i.test(item.alt)) ??
+		media.find(item => !/\b(logo|icon|banner)\b/i.test(named(item))) ??
+		media[0];
+
+	return picture ? { url: picture.url, alt: picture.alt, path: picture.path } : null;
 };
 
 const pick = (object, keys) =>

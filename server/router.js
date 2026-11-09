@@ -89,6 +89,16 @@ export const createRouter = ({ hub, auth, projectsRoot }) => {
 			return new Response(Bun.file(file), { headers: { 'cache-control': 'private, max-age=86400' } });
 		}
 
+		if ((match = requestMatch('GET', '/api/games/:id/docs', request))) return Response.json(await hub.docs(match.id));
+
+		if ((match = requestMatch('GET', '/api/games/:id/media/:index', request))) {
+			const file = await hub.media(match.id, Number(match.index));
+
+			if (!file) return Response.json({ error: 'No such picture' }, { status: 404 });
+
+			return new Response(Bun.file(file), { headers: { 'cache-control': 'private, max-age=86400' } });
+		}
+
 		if ((match = requestMatch('GET', '/api/games/:id/logs', request))) {
 			const lines = Math.min(Number(new URL(request.url).searchParams.get('lines')) || 200, 2000);
 

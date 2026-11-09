@@ -23,7 +23,52 @@ const StyledCard = styled(
 		/* --game-color is set per card, from the game's own manifest */
 		display: flex;
 		flex-direction: column;
-		gap: ${space.sm};
+		padding: 0;
+		overflow: hidden;
+
+		.body {
+			display: flex;
+			flex-direction: column;
+			gap: ${space.sm};
+			padding: ${space.md};
+		}
+
+		.cover {
+			display: block;
+			padding: 0;
+			border: none;
+			cursor: pointer;
+			aspect-ratio: 21 / 9;
+			overflow: hidden;
+			background: ${colors.alpha(colors.vantablack, 0.4)};
+		}
+
+		.cover img {
+			width: 100%;
+			height: 100%;
+			object-fit: cover;
+			object-position: top;
+			transition: transform 0.4s, filter 0.3s;
+		}
+
+		.cover:hover img {
+			transform: scale(1.03);
+		}
+
+		&.off .cover img {
+			filter: grayscale(0.6) brightness(0.75);
+		}
+
+		.blurb {
+			margin: 0;
+			color: ${colors.muted};
+			font-size: 0.9em;
+			line-height: 1.4;
+			display: -webkit-box;
+			-webkit-line-clamp: 3;
+			-webkit-box-orient: vertical;
+			overflow: hidden;
+		}
 		border-top: 3px solid var(--game-color);
 		background-image: linear-gradient(
 			165deg,
@@ -200,6 +245,7 @@ export default class GameCard extends StyledCard {
 		onChanged: {},
 		onSettings: {},
 		onLogs: {},
+		onAbout: {},
 	};
 
 	async act(action, { confirm } = {}) {
@@ -241,8 +287,24 @@ export default class GameCard extends StyledCard {
 		this.elem.style.setProperty('--game-color', game.look.color);
 		if (!on) this.addClass('off');
 
+		const { about } = game;
+		const openAbout = () => this.options.onAbout?.(game);
+
+		if (about.cover) {
+			new Component({
+				appendTo: this,
+				tag: 'button',
+				addClass: 'cover',
+				title: `About ${game.name}`,
+				onPointerPress: openAbout,
+				append: new Elem({ tag: 'img', src: about.cover.url, alt: about.cover.alt, attributes: { loading: 'lazy' } }),
+			});
+		}
+
+		const body = new Elem({ appendTo: this, addClass: 'body' });
+
 		new Component({
-			appendTo: this,
+			appendTo: body,
 			addClass: 'title',
 			append: [
 				new Elem({
@@ -265,7 +327,10 @@ export default class GameCard extends StyledCard {
 			].filter(Boolean),
 		});
 
-		this.metrics = new Elem({ appendTo: this, addClass: 'metrics' });
+		if (about.blurb)
+			new Elem({ appendTo: body, tag: 'p', addClass: 'blurb', textContent: about.blurb, title: about.blurb });
+
+		this.metrics = new Elem({ appendTo: body, addClass: 'metrics' });
 		this.showReport(game.report);
 
 		if (game.git) {
@@ -273,14 +338,14 @@ export default class GameCard extends StyledCard {
 			const notes = [behind > 0 && `${behind} new upstream`, dirty && 'has local changes'].filter(Boolean);
 
 			new Component({
-				appendTo: this,
+				appendTo: body,
 				addClass: ['row', 'muted'],
 				textContent: `${branch} @ ${commit}, ${age}${notes.length > 0 ? ` · ${notes.join(' · ')}` : ''}`,
 				title: subject,
 			});
 		}
 
-		const exposeRow = new Component({ appendTo: this, addClass: 'row', append: [light(open.key)] });
+		const exposeRow = new Component({ appendTo: body, addClass: 'row', append: [light(open.key)] });
 
 		if (game.exposed && game.publicUrl) {
 			new Elem({ appendTo: exposeRow, tag: 'a', href: game.publicUrl, target: '_blank', textContent: game.publicUrl });
@@ -323,26 +388,26 @@ export default class GameCard extends StyledCard {
 		if (operation && (operation.running || !operation.ok)) {
 			if (operation.error)
 				new Elem({
-					appendTo: this,
+					appendTo: body,
 					addClass: 'error',
 					textContent: `${capitalize(operation.kind)} failed: ${operation.error}`,
 				});
 
 			if (operation.lines.length > 0) {
-				const pre = new Elem({ appendTo: this, tag: 'pre', textContent: operation.lines.join('\n') });
+				const pre = new Elem({ appendTo: body, tag: 'pre', textContent: operation.lines.join('\n') });
 
 				requestAnimationFrame(() => (pre.elem.scrollTop = pre.elem.scrollHeight));
 			}
 		} else if (operation?.ok && operation.endedAt) {
 			new Elem({
-				appendTo: this,
+				appendTo: body,
 				addClass: 'muted',
 				textContent: `${capitalize(operation.kind)}: done ${ago(operation.endedAt)}`,
 			});
 		}
 
 		new Component({
-			appendTo: this,
+			appendTo: body,
 			addClass: 'row',
 			append: [
 				on
@@ -399,6 +464,8 @@ export default class GameCard extends StyledCard {
 							},
 						}),
 				}),
+				(about.hasReadme || about.pictures > 0) &&
+					new Button({ icon: 'book-open', variant: 'flat', tooltip: 'About', onPointerPress: openAbout }),
 				new Button({
 					icon: 'scroll',
 					variant: 'flat',

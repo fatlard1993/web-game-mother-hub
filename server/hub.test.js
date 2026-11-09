@@ -386,3 +386,48 @@ describe('finding games', () => {
 		expect((await findCandidates(root, [], '/hub')).map(game => game.id)).toEqual(['rts']);
 	});
 });
+
+test("the card's cover is the first picture of play, not the logo", async () => {
+	const { hub } = setup();
+	const dir = await makeGame('driller');
+
+	await mkdir(path.join(dir, 'img'));
+	await writeFile(path.join(dir, 'img/logo.png'), '');
+	await writeFile(path.join(dir, 'img/play.png'), '');
+	await writeFile(
+		path.join(dir, 'README.md'),
+		'# Driller\n\n![logo](./img/logo.png)\n\nA game about drilling through asteroids for money.\n\n![Play: the rig](./img/play.png)',
+	);
+
+	const { about } = await hub.add({ dir });
+
+	expect(about).toMatchObject({
+		blurb: 'A game about drilling through asteroids for money.',
+		cover: { alt: 'Play: the rig' },
+		pictures: 2,
+		hasReadme: true,
+	});
+});
+
+test('a cover chosen here outranks the README, and changing it leaves the name following the game', async () => {
+	const { hub } = setup();
+	const dir = await makeGame('driller');
+
+	await mkdir(path.join(dir, 'img'));
+	await mkdir(path.join(dir, 'client'));
+	await writeFile(path.join(dir, 'client/manifest.json'), JSON.stringify({ name: 'Driller' }));
+	await writeFile(path.join(dir, 'img/lobby.png'), '');
+	await writeFile(path.join(dir, 'img/play.png'), '');
+	await writeFile(path.join(dir, 'README.md'), '![The lobby](./img/lobby.png) ![Play: the rig](./img/play.png)');
+
+	const { id, about } = await hub.add({ dir });
+
+	expect(about.cover.alt).toBe('Play: the rig');
+
+	const edited = await hub.edit(id, { cover: 'img/lobby.png' });
+
+	expect(edited.about.cover.alt).toBe('The lobby');
+
+	await writeFile(path.join(dir, 'client/manifest.json'), JSON.stringify({ name: 'Driller 2' }));
+	expect((await hub.get(id)).name).toBe('Driller 2');
+});
