@@ -5,7 +5,7 @@ import path from 'path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 
 import { findCandidates } from './detect';
-import { createHub } from './hub';
+import { createHub, untilNext } from './hub';
 
 let root;
 
@@ -656,5 +656,33 @@ describe('updating by itself', () => {
 
 		expect(ran.some(command => command.includes('fetch'))).toBe(false);
 		expect(pulls(ran)).toBe(0);
+	});
+});
+
+describe('the nightly round', () => {
+	test("runs at tonight's hour if it's still ahead, else tomorrow's", () => {
+		const at = (hours, minutes) => new Date(2026, 10, 8, hours, minutes);
+
+		expect(untilNext('04:00', at(3, 30))).toBe(30 * 60 * 1000);
+		expect(untilNext('04:00', at(21, 0))).toBe(7 * 60 * 60 * 1000);
+		expect(untilNext('04:00', at(4, 0))).toBe(24 * 60 * 60 * 1000);
+	});
+
+	test("a round that's only fetching updates nothing, even a game set to update itself", async () => {
+		const ran = [];
+		const run = async argv => {
+			ran.push(argv.join(' '));
+			if (argv.includes('rev-list')) return { code: 0, output: '3' };
+
+			return { code: 0, output: argv.includes('rev-parse') ? 'abc' : '' };
+		};
+		const { hub } = setup({ run });
+		const { id } = await hub.add({ dir: await makeGame('auto') });
+
+		await hub.edit(id, { autoUpdate: true });
+		await hub.autoUpdateRound({ updating: false });
+
+		expect(ran.some(command => command.endsWith('fetch --quiet'))).toBe(true);
+		expect(ran.includes('git pull --ff-only')).toBe(false);
 	});
 });

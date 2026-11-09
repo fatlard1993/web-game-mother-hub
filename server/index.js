@@ -61,10 +61,10 @@ const { options } = new Argi({
 			defaultValue: 19100,
 			description: "Tunnels listen on the VPS's loopback at the ports after this",
 		},
-		'update-minutes': {
-			type: 'number',
-			defaultValue: Number(env.MOTHER_HUB_UPDATE_MINUTES) || 15,
-			description: 'How often every game is checked upstream, and those set to update themselves are updated',
+		'update-at': {
+			type: 'string',
+			defaultValue: env.MOTHER_HUB_UPDATE_AT || '04:00',
+			description: 'When, each night (HH:MM), the games set to update themselves are updated',
 		},
 		slots: { type: 'number', defaultValue: 8, description: 'How many games can be exposed at once' },
 	},
@@ -136,8 +136,15 @@ const hub = createHub({
 
 await serve({ port: options.port, router: createRouter({ hub, auth, projectsRoot: options.projects }) });
 
-// The first round a minute after starting, not in the same breath as a restart, and then every so often
-setTimeout(() => hub.autoUpdateRound().catch(error => console.error('An auto-update round failed', error)), 60_000);
-hub.startAutoUpdates(options['update-minutes'] * 60_000);
+if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(options['update-at']))
+	throw new Error('MOTHER_HUB_UPDATE_AT is HH:MM, as 04:00');
+
+// A minute after starting, every game is fetched so its card's counts are right, but nothing's updated: that's the
+// night's to do
+setTimeout(
+	() => hub.autoUpdateRound({ updating: false }).catch(error => console.error('Fetching the games failed', error)),
+	60_000,
+);
+hub.startNightlyUpdates(options['update-at']);
 
 devConsole();

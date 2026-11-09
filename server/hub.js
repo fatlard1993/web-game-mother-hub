@@ -17,6 +17,8 @@ const HEALTH_TIMEOUT_MS = 1500;
 const OPERATION_LINES = 400;
 // What leaves a game freshly started, and so worth a new picture of
 const FRESH_STARTS = ['turn on', 'restart', 'update', 'reset'];
+// How soon the night's round looks again at a game still waiting on its players
+const RETRY_WAITING_MS = 60 * 60 * 1000;
 // How often the bun-server@ units are looked through for games the hub hasn't met
 const DISCOVER_MS = 30_000;
 // How long a started game is given to answer before its picture is given up on
@@ -370,10 +372,11 @@ export const createHub = ({
 		return code === 0 ? output.trim() : null;
 	};
 
-	// One pass over every game: each with an upstream is fetched, so its card says what's waiting, and each set to
-	// update itself does, unless someone's playing it (it waits for them to go) or the same upstream already failed
-	// to update (it waits for a new one, rather than failing on the same commit every round)
-	const autoUpdateRound = async () => {
+	// One pass over every game: each with an upstream is fetched, so its card says what's waiting, and, when it's the
+	// night's round, each set to update itself does, unless someone's playing it (it waits for them to go) or the same
+	// upstream already failed to update (it waits for a new one, rather than failing on the same commit every night).
+	// Resolves to whether any game is still waiting on its players.
+	const autoUpdateRound = async ({ updating = true } = {}) => {
 		for (const record of Object.values(games())) {
 			if (operations.get(record.id)?.running) continue;
 
@@ -387,7 +390,7 @@ export const createHub = ({
 			const behind = Number(await gitOut(record, 'rev-list', '--count', 'HEAD..@{u}')) || 0;
 			const target = await gitOut(record, 'rev-parse', '@{u}');
 
-			if (!record.autoUpdate || behind === 0 || target === record.autoUpdateFailedAt) {
+			if (!updating || !record.autoUpdate || behind === 0 || target === record.autoUpdateFailedAt) {
 				updateWaiting.delete(record.id);
 				continue;
 			}
@@ -406,19 +409,33 @@ export const createHub = ({
 			record.autoUpdateFailedAt = operation.ok ? null : target;
 			await db.write();
 		}
+
+		return updateWaiting.size > 0;
 	};
 
 	return {
 		autoUpdateRound,
 
-		// The rounds, from now on, every so often; returns what stops them
-		startAutoUpdates: everyMs => {
-			const timer = setInterval(
-				() => autoUpdateRound().catch(error => console.error('An auto-update round failed', error)),
-				everyMs,
-			);
+		// The night's round at `at` (HH:MM, local time) every night from now on, and again an hour later while a game
+		// is still waiting on its players; returns what stops them
+		startNightlyUpdates: at => {
+			let timer;
 
-			return () => clearInterval(timer);
+			const schedule = delay => {
+				timer = setTimeout(async () => {
+					const waiting = await autoUpdateRound().catch(error => {
+						console.error('The nightly update round failed', error);
+
+						return false;
+					});
+
+					schedule(waiting ? RETRY_WAITING_MS : untilNext(at, now()));
+				}, delay);
+			};
+
+			schedule(untilNext(at, now()));
+
+			return () => clearTimeout(timer);
 		},
 
 		list: async () => {
@@ -636,6 +653,17 @@ const coverOf = (media, chosen) => {
 		media.find(item => item.path === LIVE);
 
 	return picture ? { url: picture.url, alt: picture.alt, path: picture.path } : null;
+};
+
+// How long from `from` until the next `at` o'clock (HH:MM, local time): today's if it's still ahead, else tomorrow's
+export const untilNext = (at, from = new Date()) => {
+	const [hours, minutes] = String(at).split(':').map(Number);
+	const next = new Date(from);
+
+	next.setHours(hours, minutes || 0, 0, 0);
+	if (next <= from) next.setDate(next.getDate() + 1);
+
+	return next - from;
 };
 
 const pick = (object, keys) =>
