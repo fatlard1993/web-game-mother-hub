@@ -21,7 +21,12 @@ const parseShow = output =>
 			.map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]),
 	);
 
-export const createUnits = ({ run, home = os.homedir(), bun = process.execPath }) => {
+export const createUnits = ({
+	run,
+	home = os.homedir(),
+	bun = process.execPath,
+	projectsRoot = path.join(home, 'Projects'),
+}) => {
 	const systemctl = (...argv) => run(['systemctl', '--user', ...argv]);
 	const dropIn = name => path.join(home, '.config', 'systemd', 'user', `${name}.service.d`, 'port.conf');
 
@@ -91,14 +96,27 @@ export const createUnits = ({ run, home = os.homedir(), bun = process.execPath }
 		await writeFile(file, `# Written by web-game-mother-hub\n${contents}`);
 	};
 
+	// The template the games run as, where dotfiles hasn't linked its own (a machine paude hosts games on by itself):
+	// the same shape, a game's folder in the projects folder run with `bun run start`
+	const installTemplate = async onLine => {
+		const file = path.join(home, '.config', 'systemd', 'user', TEMPLATE);
+
+		await mkdir(path.dirname(file), { recursive: true });
+		await writeFile(
+			file,
+			`# Written by web-game-mother-hub, there being no ${TEMPLATE} here. Each instance is a game: bun-server@<folder>.\n[Unit]\nDescription=%i bun server\n\n[Service]\nWorkingDirectory=${projectsRoot}/%i\nExecStart=${bun} run start\nRestart=on-failure\n\n[Install]\nWantedBy=default.target\n`,
+		);
+		await systemctl('daemon-reload');
+		onLine(`Installed the ${TEMPLATE} template unit`);
+	};
+
 	const startGame = async (id, settings, onLine = () => {}) => {
 		const name = gameUnit(id);
 
 		await writePort(name, settings);
 		await systemctl('daemon-reload');
 
-		if ((await systemctl('cat', TEMPLATE)).code !== 0)
-			throw new Error(`The ${TEMPLATE} template unit isn't installed here (dotfiles' game-servers links it)`);
+		if ((await systemctl('cat', TEMPLATE)).code !== 0) await installTemplate(onLine);
 
 		for (const argv of [
 			['enable', '--now', name],

@@ -21,30 +21,61 @@ if (!options.host || !options.remote || !options.local) {
 	process.exit(2);
 }
 
-const ssh = Bun.spawn(
-	[
-		'ssh',
-		'-N',
-		'-o',
-		'BatchMode=yes',
-		...(options.identity ? ['-i', options.identity, '-o', 'IdentitiesOnly=yes'] : []),
-		// The first tunnel meets the VPS's host key, kept from then on; one that changes after is refused
-		'-o',
-		'StrictHostKeyChecking=accept-new',
-		// A forward the VPS refuses (its port still held by a dead session) is a failure, not a quiet tunnel to nowhere
-		'-o',
-		'ExitOnForwardFailure=yes',
-		'-o',
-		'ServerAliveInterval=15',
-		'-o',
-		'ServerAliveCountMax=3',
-		'-R',
-		`127.0.0.1:${options.remote}:127.0.0.1:${options.local}`,
-		options.host,
-	],
-	{ stdio: ['ignore', 'inherit', 'inherit'] },
-);
+// The hub on the VPS itself (paude's own copy there) needs no ssh: the tunnel's loopback port is forwarded here, byte
+// for byte, to the game's
+if (options.host === 'local') {
+	Bun.listen({
+		hostname: '127.0.0.1',
+		port: options.remote,
+		socket: {
+			open: async client => {
+				client.data = { pending: [] };
+				client.data.game = await Bun.connect({
+					hostname: '127.0.0.1',
+					port: options.local,
+					socket: {
+						data: (_, chunk) => client.write(chunk),
+						close: () => client.end(),
+						error: () => client.end(),
+					},
+				}).catch(() => client.end());
 
-process.on('SIGTERM', () => ssh.kill('SIGTERM'));
+				for (const chunk of client.data.pending) client.data.game?.write(chunk);
+				client.data.pending = null;
+			},
+			data: (client, chunk) => (client.data.pending ? client.data.pending.push(chunk) : client.data.game?.write(chunk)),
+			close: client => client.data?.game?.end(),
+			error: client => client.data?.game?.end(),
+		},
+	});
 
-process.exit(await ssh.exited);
+	console.log(`Forwarding 127.0.0.1:${options.remote} to the game on :${options.local}`);
+} else {
+	const ssh = Bun.spawn(
+		[
+			'ssh',
+			'-N',
+			'-o',
+			'BatchMode=yes',
+			...(options.identity ? ['-i', options.identity, '-o', 'IdentitiesOnly=yes'] : []),
+			// The first tunnel meets the VPS's host key, kept from then on; one that changes after is refused
+			'-o',
+			'StrictHostKeyChecking=accept-new',
+			// A forward the VPS refuses (its port still held by a dead session) is a failure, not a quiet tunnel to nowhere
+			'-o',
+			'ExitOnForwardFailure=yes',
+			'-o',
+			'ServerAliveInterval=15',
+			'-o',
+			'ServerAliveCountMax=3',
+			'-R',
+			`127.0.0.1:${options.remote}:127.0.0.1:${options.local}`,
+			options.host,
+		],
+		{ stdio: ['ignore', 'inherit', 'inherit'] },
+	);
+
+	process.on('SIGTERM', () => ssh.kill('SIGTERM'));
+
+	process.exit(await ssh.exited);
+}

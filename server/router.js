@@ -1,3 +1,6 @@
+import { rm } from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import { requestMatch, sameOrigin, serveApp, ValidationError, withErrors } from '@vanilla-bean/components/app';
 
 import { findCandidates } from './detect';
@@ -25,7 +28,7 @@ const jsonObject = async request => {
 	return body;
 };
 
-export const createRouter = ({ hub, auth, projectsRoot }) => {
+export const createRouter = ({ hub, auth, projectsRoot, pageRoot = 'client/build' }) => {
 	const session = async (request, server) => {
 		if (requestMatch('GET', '/api/session', request)) return Response.json({ loggedIn: auth.isLoggedIn(request) });
 
@@ -65,6 +68,21 @@ export const createRouter = ({ hub, auth, projectsRoot }) => {
 			const known = (await hub.list()).map(game => game.dir);
 
 			return Response.json(await findCandidates(projectsRoot, known));
+		}
+
+		// paude hosting a game: JSON first, and the repo as a git bundle when the hub can't see it where paude does
+		if (requestMatch('POST', '/api/host', request)) return Response.json(await hub.host(await jsonObject(request)));
+
+		if ((match = requestMatch('POST', '/api/host/:name/bundle', request))) {
+			const file = path.join(os.tmpdir(), `mother-hub-${process.pid}-${Date.now()}.bundle`);
+
+			await Bun.write(file, await request.arrayBuffer());
+
+			try {
+				return Response.json(await hub.hostBundle(match.name, file));
+			} finally {
+				await rm(file, { force: true });
+			}
 		}
 
 		if (requestMatch('POST', '/api/exposure/off', request)) return Response.json({ closed: await hub.concealAll() });
@@ -131,7 +149,7 @@ export const createRouter = ({ hub, auth, projectsRoot }) => {
 
 		if (!sameOrigin(request)) return new Response('Cross-origin request refused', { status: 403 });
 
-		if (!pathname.startsWith('/api/')) return serveApp(request);
+		if (!pathname.startsWith('/api/')) return serveApp(request, { root: pageRoot });
 
 		const answered = await session(request, server);
 		if (answered) return answered;

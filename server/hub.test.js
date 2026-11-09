@@ -686,3 +686,110 @@ describe('the nightly round', () => {
 		expect(ran.includes('git pull --ff-only')).toBe(false);
 	});
 });
+
+describe('hosting for paude', () => {
+	const realGit = async (argv, options) => {
+		if (argv[0] !== 'git') return { code: 0, output: '' };
+
+		const { run } = await import('./run');
+
+		return run(argv, options);
+	};
+
+	const gitIn = async (dir, ...argv) => (await realGit(['git', '-C', dir, ...argv])).output.trim();
+
+	// A game repo where paude builds it, outside the hub's projects folder, as on another machine
+	const paudeGame = async () => {
+		const elsewhere = await mkdtemp(path.join(os.tmpdir(), 'paude-'));
+		const dir = path.join(elsewhere, 'sand');
+
+		await mkdir(dir);
+		await writeFile(path.join(dir, 'server.js'), '');
+		await writeFile(
+			path.join(dir, 'package.json'),
+			JSON.stringify({
+				name: 'sand',
+				scripts: { start: 'x' },
+				dependencies: { '@fatlard1993/web-game-framework': 'x' },
+			}),
+		);
+		await realGit(['git', 'init', '-q', dir]);
+		await realGit([
+			'git',
+			'-C',
+			dir,
+			'-c',
+			'user.name=t',
+			'-c',
+			'user.email=t@t',
+			'commit',
+			'-qam',
+			'one',
+			'--allow-empty',
+		]);
+		await realGit(['git', '-C', dir, 'add', '-A']);
+		await realGit(['git', '-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'two']);
+
+		return dir;
+	};
+
+	const bundleOf = async dir => {
+		const file = path.join(path.dirname(dir), `${Date.now()}.bundle`);
+
+		await realGit(['git', '-C', dir, 'bundle', 'create', '--quiet', file, 'HEAD', '--branches']);
+
+		return file;
+	};
+
+	test('a game the hub sees at the same commit is hosted where it is, started and named', async () => {
+		const lanDir = path.join(root, 'lan-names.d');
+		const ran = [];
+		const units = fakeUnits();
+		const hub = createHub({
+			db: fakeDb(),
+			units,
+			run: async argv => (ran.push(argv.join(' ')), { code: 0, output: argv.includes('HEAD') ? 'abc' : '' }),
+			probe: async () => ({ ok: true }),
+			projectsRoot: root,
+			lanNames: { dir: lanDir, refresh: 'refresh-names' },
+			resetsDir: path.join(root, 'resets'),
+			exposure: {},
+			bun: 'bun',
+			hubDir: root,
+		});
+		const dir = await makeGame('sand', { scaffold: true });
+
+		expect(await hub.host({ name: 'sand', dir, head: 'other' })).toEqual({ needsBundle: true });
+
+		const hosted = await hub.host({ name: 'sand', dir, head: 'abc' });
+
+		expect(hosted).toMatchObject({ id: 'sand', port: 4100 });
+		expect(units.units.get('bun-server@sand').active).toBe(true);
+		expect(await Bun.file(path.join(lanDir, 'sand.conf')).text()).toBe('sand=4100\n');
+		expect(ran).toContain('sh -c refresh-names');
+	});
+
+	test('a bundle is cloned in the first time, brought forward after, and never laid over a folder that was here', async () => {
+		const { hub, units } = setup({ run: realGit });
+		const dir = await paudeGame();
+
+		expect(await hub.host({ name: 'sand', dir, head: await gitIn(dir, 'rev-parse', 'HEAD') })).toEqual({
+			needsBundle: true,
+		});
+
+		await hub.hostBundle('sand', await bundleOf(dir));
+
+		expect(await gitIn(path.join(root, 'sand'), 'rev-parse', 'HEAD')).toBe(await gitIn(dir, 'rev-parse', 'HEAD'));
+		expect(units.units.get('bun-server@sand').active).toBe(true);
+
+		await writeFile(path.join(dir, 'Game.js'), 'more');
+		await realGit(['git', '-C', dir, 'add', '-A']);
+		await realGit(['git', '-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'three']);
+		await hub.hostBundle('sand', await bundleOf(dir));
+
+		expect(await gitIn(path.join(root, 'sand'), 'log', '-1', '--format=%s')).toBe('three');
+
+		await makeGame('mine');
+		await expect(hub.hostBundle('mine', await bundleOf(dir))).rejects.toThrow("isn't a game paude hosted");
+	});
+});

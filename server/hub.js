@@ -1,5 +1,5 @@
 import { existsSync, lstatSync, statSync } from 'fs';
-import { mkdir, rename } from 'fs/promises';
+import { mkdir, rename, writeFile } from 'fs/promises';
 import path from 'path';
 
 import { ValidationError } from '@vanilla-bean/components/app';
@@ -16,7 +16,7 @@ const GIT_CACHE_MS = 30_000;
 const HEALTH_TIMEOUT_MS = 1500;
 const OPERATION_LINES = 400;
 // What leaves a game freshly started, and so worth a new picture of
-const FRESH_STARTS = ['turn on', 'restart', 'update', 'reset'];
+const FRESH_STARTS = ['turn on', 'restart', 'update', 'reset', 'host'];
 // How soon the night's round looks again at a game still waiting on its players
 const RETRY_WAITING_MS = 60 * 60 * 1000;
 // How often the bun-server@ units are looked through for games the hub hasn't met
@@ -48,6 +48,8 @@ export const createHub = ({
 	projectsRoot,
 	selfId = null,
 	lanUrl = () => null,
+	// Where this machine keeps its LAN names, and what makes them names (both optional)
+	lanNames = {},
 	hubDir,
 	resetsDir,
 	exposure,
@@ -343,20 +345,24 @@ export const createHub = ({
 
 	// Pulls, installs and builds. Any step failing stops it there, and the running game is left alone: still the code
 	// it was started with, since it's only restarted once everything before it worked.
+	// Frozen, as dotfiles installs them: a plain install rewrites bun.lock when the framework drifts ahead of it, and the
+	// dirty file stops every pull after
+	const build = async (record, log) => {
+		const locked = ['bun.lock', 'bun.lockb'].some(file => existsSync(path.join(record.dir, file)));
+
+		await step(log, [bun, 'install', ...(locked ? ['--frozen-lockfile'] : [])], record.dir);
+		if (record.hasBuild) await step(log, [bun, 'run', 'build'], record.dir);
+	};
+
 	const update = id =>
 		operate(id, 'update', async (record, log) => {
-			// An arcade game shelved from the folder it's built in has nothing to pull from; what's there is built
+			// A game hosted from paude's arcade has nothing to pull from (paude sends it); what's there is built
 			const { code: tracking } = await run(['git', '-C', record.dir, 'rev-parse', '--abbrev-ref', '@{u}']);
 
 			if (tracking === 0) await step(log, ['git', 'pull', '--ff-only'], record.dir);
 			else log('No upstream to pull from; building what is here');
 
-			// Frozen, as dotfiles installs them: a plain install rewrites bun.lock when the framework drifts ahead of it,
-			// and the dirty file stops every pull after
-			const locked = ['bun.lock', 'bun.lockb'].some(file => existsSync(path.join(record.dir, file)));
-
-			await step(log, [bun, 'install', ...(locked ? ['--frozen-lockfile'] : [])], record.dir);
-			if (record.hasBuild) await step(log, [bun, 'run', 'build'], record.dir);
+			await build(record, log);
 
 			if ((await units.state(gameUnit(id))).active) {
 				log('Restarting');
@@ -365,6 +371,46 @@ export const createHub = ({
 
 			log('✓ Up to date');
 		});
+
+	// A game's name on the LAN, where the machine has one to give (dotfiles' lan-names on the htpc): a `name=port` file
+	// in the names folder, and the command that makes them names
+	const nameOnLan = async (record, log) => {
+		if (!lanNames.dir) return;
+
+		await mkdir(lanNames.dir, { recursive: true });
+		await writeFile(path.join(lanNames.dir, `${record.id}.conf`), `${record.id}=${record.port}\n`);
+
+		if (lanNames.refresh) await step(log, ['sh', '-c', lanNames.refresh], hubDir);
+	};
+
+	// Built, started (or restarted), and named: what hosting does with a game's folder once it's here
+	const hostHere = (record, log) =>
+		(async () => {
+			await build(record, log);
+
+			if ((await units.state(gameUnit(record.id))).active) {
+				log('Restarting');
+				await units.restart(gameUnit(record.id));
+			} else await startGame(record, log);
+
+			await nameOnLan(record, log);
+			log('✓ Hosted');
+		})();
+
+	const hostFolder = async (id, target) => {
+		const record = games()[id] ?? (await add(target).then(() => games()[id]));
+
+		record.hosted = 'paude';
+		await db.write();
+
+		const { operation, done } = operate(id, 'host', (current, log) => hostHere(current, log));
+
+		await done;
+
+		if (!operation.ok) throw new ValidationError(`Hosting ${record.name} failed: ${operation.error}`);
+
+		return { id, name: record.name, port: record.port, url: lanUrl(record.port), lines: operation.lines };
+	};
 
 	const gitOut = async (record, ...argv) => {
 		const { code, output } = await run(['git', '-C', record.dir, ...argv]);
@@ -415,6 +461,47 @@ export const createHub = ({
 
 	return {
 		autoUpdateRound,
+
+		// paude's arcade putting a game with the house's: hosted in place when the hub sees the same repo at the same
+		// commit (the same machine), and otherwise asking for it as a git bundle (hostBundle), which works from anywhere
+		host: async ({ name, dir, head }) => {
+			const id = hostedName(name);
+			const target = path.join(projectsRoot, id);
+			const here =
+				dir &&
+				path.resolve(dir) === target &&
+				existsSync(target) &&
+				(await gitOut({ dir: target }, 'rev-parse', 'HEAD'));
+
+			if (!here || here !== head) return { needsBundle: true };
+
+			return hostFolder(id, target);
+		},
+
+		// The game's repo as a bundle: cloned into the projects folder the first time, brought forward after
+		hostBundle: async (name, bundleFile) => {
+			const id = hostedName(name);
+			const target = path.join(projectsRoot, id);
+			const record = games()[id];
+
+			if (!existsSync(target)) {
+				const { code, output } = await run(['git', 'clone', '--quiet', bundleFile, target]);
+
+				if (code !== 0) throw new ValidationError(`The game couldn't be unpacked: ${output}`);
+				// The bundle is gone once this is done; the game's next version comes the same way
+				await run(['git', '-C', target, 'remote', 'remove', 'origin']);
+			} else if (record?.hosted !== 'paude') {
+				throw new ValidationError(`${target} is already here, and isn't a game paude hosted`);
+			} else {
+				const fetched = await run(['git', '-C', target, 'fetch', '--quiet', bundleFile, 'HEAD']);
+				const merged = fetched.code === 0 && (await run(['git', '-C', target, 'merge', '--ff-only', 'FETCH_HEAD']));
+
+				if (!merged || merged.code !== 0)
+					throw new ValidationError(`${id}'s new version doesn't follow on from the one here`);
+			}
+
+			return hostFolder(id, target);
+		},
 
 		// The night's round at `at` (HH:MM, local time) every night from now on, and again an hour later while a game
 		// is still waiting on its players; returns what stops them
@@ -664,6 +751,18 @@ export const untilNext = (at, from = new Date()) => {
 	if (next <= from) next.setDate(next.getDate() + 1);
 
 	return next - from;
+};
+
+// A hosted game's id is its folder's name: letters, digits and dashes
+const hostedName = name => {
+	const id = String(name ?? '')
+		.toLowerCase()
+		.replace(/[^a-z0-9-]+/g, '-')
+		.replace(/^-+|-+$/g, '');
+
+	if (!id) throw new ValidationError('A hosted game needs a name');
+
+	return id;
 };
 
 const pick = (object, keys) =>

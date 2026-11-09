@@ -5,7 +5,9 @@ const SESSION_DAYS = 30;
 
 // Everything here can stop a game or open one to the internet, so every request but the login itself needs the
 // password. It lives only as an argon2 hash, the signing secret only in the database, both made on first boot.
-export const createAuth = async ({ db, password }) => {
+// The token is how paude, on this machine or another, hosts games here (POST /api/host): a shared secret, sent as a
+// bearer header, so keep it as close as the password
+export const createAuth = async ({ db, password, token = null }) => {
 	const stored = (db.data.auth ||= {});
 
 	stored.secret ||= randomBytes(32).toString('hex');
@@ -63,7 +65,18 @@ export const createAuth = async ({ db, password }) => {
 	const cookie = (value, maxAge) => `${COOKIE_NAME}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}`;
 
 	return {
-		isLoggedIn: request => verifyToken(readCookie(request)),
+		isLoggedIn: request => {
+			if (verifyToken(readCookie(request))) return true;
+
+			const bearer = /^Bearer (.+)$/.exec(request.headers.get('authorization') ?? '')?.[1];
+
+			return (
+				!!token &&
+				!!bearer &&
+				bearer.length === token.length &&
+				timingSafeEqual(Buffer.from(bearer), Buffer.from(token))
+			);
+		},
 		checkPassword: async candidate => Bun.password.verify(String(candidate ?? ''), stored.passwordHash),
 		sessionCookie: () => {
 			const expiry = Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000;

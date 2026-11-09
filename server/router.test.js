@@ -67,3 +67,19 @@ test('a restart with the same password keeps everyone logged in; a new password 
 	expect((await createAuth({ db: store, password: 'hunter2' })).isLoggedIn(session)).toBe(true);
 	expect((await createAuth({ db: store, password: 'swordfish' })).isLoggedIn(session)).toBe(false);
 });
+
+test("paude's token hosts games; a wrong one is refused", async () => {
+	const auth = await createAuth({ db: db(), password: 'hunter2', token: 'paude-secret-token' });
+	const router = createRouter({ hub: { host: async () => ({ needsBundle: true }) }, auth, projectsRoot: '/nowhere' });
+	const host = token =>
+		router(
+			new Request('http://hub/api/host', {
+				method: 'POST',
+				headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+				body: JSON.stringify({ name: 'sand' }),
+			}),
+		);
+
+	expect(await (await host('paude-secret-token')).json()).toEqual({ needsBundle: true });
+	expect((await host('paude-secret-tokex')).status).toBe(401);
+});

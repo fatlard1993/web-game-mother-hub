@@ -4,7 +4,7 @@ import { existsSync, readFileSync, statSync } from 'fs';
 import os from 'os';
 import path from 'path';
 
-import { devConsole, handleExit, openDatabase, serve } from '@vanilla-bean/components/app';
+import { buildClient, devConsole, handleExit, openDatabase, serve } from '@vanilla-bean/components/app';
 import Argi from 'argi-cli';
 
 import { createAuth } from './auth';
@@ -70,9 +70,22 @@ const { options } = new Argi({
 	},
 });
 
+// Run from a package (paude's own copy of the hub) rather than a checkout, there's been no install to build the page
+if (!existsSync(path.join(import.meta.dir, '../client/build/index.html')))
+	await buildClient({
+		entrypoints: [path.join(import.meta.dir, '../client/index.html')],
+		outdir: path.join(import.meta.dir, '../client/build'),
+	});
+
 const db = await openDatabase({ path: options.database, defaults: { games: {} } });
 
-const auth = await createAuth({ db, password: options.password || env.MOTHER_HUB_PASSWORD });
+const auth = await createAuth({
+	db,
+	password: options.password || env.MOTHER_HUB_PASSWORD,
+	token: env.MOTHER_HUB_TOKEN || null,
+});
+
+const home = file => (file?.startsWith('~/') ? path.join(os.homedir(), file.slice(2)) : file);
 
 // The LAN's names for what this machine serves, read again when the file changes (lan-names regenerates it)
 let lanNames = { at: 0, urls: new Map() };
@@ -113,7 +126,12 @@ const probe = async (url, timeout) => {
 
 const hub = createHub({
 	db,
-	units: createUnits({ run }),
+	units: createUnits({ run, projectsRoot: path.resolve(options.projects) }),
+	// Where a hosted game is given its LAN name, on a machine that names them (the htpc: dotfiles' lan-names)
+	lanNames: {
+		dir: home(env.MOTHER_HUB_LAN_NAMES_DIR) || null,
+		refresh: env.MOTHER_HUB_LAN_NAMES_REFRESH?.replace(/(^|\s)~\//g, `$1${os.homedir()}/`) || null,
+	},
 	run,
 	probe,
 	shots: createShots({ dir: path.join(path.dirname(db.path), '.web-game-mother-hub-shots'), run }),
@@ -134,7 +152,10 @@ const hub = createHub({
 	},
 });
 
-await serve({ port: options.port, router: createRouter({ hub, auth, projectsRoot: options.projects }) });
+await serve({
+	port: options.port,
+	router: createRouter({ hub, auth, projectsRoot: options.projects, pageRoot: path.join(hubDir, 'client/build') }),
+});
 
 if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(options['update-at']))
 	throw new Error('MOTHER_HUB_UPDATE_AT is HH:MM, as 04:00');

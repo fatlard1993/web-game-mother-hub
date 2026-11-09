@@ -15,6 +15,9 @@ The hub lives on the htpc beside the games, and [dotfiles](https://github.com/fa
 | `MOTHER_HUB_PUBLIC_HOST` | `--public-host` |  | the VPS's address as players type it |
 | `MOTHER_HUB_LAN_NAMES` | `--lan-names` | `~/.config/lan-names.urls` | each service's LAN address, as `lan-names` writes it |
 | `MOTHER_HUB_PORT` | `--port` | `8036` | where the page is served |
+| `MOTHER_HUB_TOKEN` |  |  | what paude hosts games with, as a bearer token |
+| `MOTHER_HUB_LAN_NAMES_DIR` |  |  | where a hosted game's `name=port` goes, to be named |
+| `MOTHER_HUB_LAN_NAMES_REFRESH` |  |  | the command that makes those names |
 | `MOTHER_HUB_UPDATE_AT` | `--update-at` | `04:00` | when, each night, the games set to update themselves are |
 |  | `--database` | `~/.web-game-mother-hub.json` | the games and their settings |
 |  | `--projects` | `~/Projects` | where the games are, as `bun-server@` runs them |
@@ -50,9 +53,16 @@ A game says how it looks and how it's doing itself; the hub only reads it.
 - **How it looks now** is the hub's own picture: each time a game starts, restarts, updates or resets, the hub opens it in headless Chrome and keeps a picture of it, last in the gallery. A game whose README shows no pictures gets it as its cover, and **Take a picture now** on the About page takes a fresh one. Chrome is found on the PATH (`google-chrome`, `chromium`), or named by `CHROME`; without one there are no live pictures, and nothing else changes.
 - **Its numbers** come from `GET /.well-known/web-game`, which every game on [web-game-framework](https://github.com/fatlard1993/web-game-framework) answers: how many have it open right now, the games going and the players in them, and its memory. A game adds numbers of its own with the Server's `status` option, `server => [{ label: 'deepest dig', value: 42 }]`, and they show on its card as they are. A game that doesn't answer it still gets its light, from any answer on its port.
 
-## From paude's arcade
+## Hosting for paude
 
-A game shelved in paude's arcade on the htpc (dotfiles' `shelf-game`, paude's `arcade.shelf`) becomes a `bun-server@` unit with a `.home` name, and so a card here, with nothing more to do.
+paude's arcade hosts its games here: wired to a hub (its `arcade.hub`, a URL and this hub's token), or, given none, running a copy of the hub of its own. Either way it's the same API:
+
+- `POST /api/host` with `{ name, dir, head }`. When the hub sees the game's repo in its projects folder at that commit (paude on the same machine), it hosts it there. Otherwise it answers `{ needsBundle: true }`.
+- `POST /api/host/<name>/bundle` with the repo as a git bundle (`git bundle create - HEAD --branches`) for the body. The first time it's cloned into the projects folder; after that, each new bundle is brought forward on top (fast-forward only). That way a game built in a local repo, with no remote to pull from, can be hosted from any machine.
+
+Hosting installs and builds the game, starts it (or restarts it), and, on a machine that names its services, gives it its LAN name: a `name=port` file in `MOTHER_HUB_LAN_NAMES_DIR`, then `MOTHER_HUB_LAN_NAMES_REFRESH` run to make it a name (on the htpc, dotfiles' `lan-names`). Hosting the same game again brings it up to date. The request takes `Authorization: Bearer <MOTHER_HUB_TOKEN>`, a shared secret, so keep it as close as the password.
+
+On a machine without dotfiles' `bun-server@` template unit, the hub installs its own, of the same shape, the first time it starts a game.
 
 A game made with web-game-framework's `new-game` starts with its face already: its title, its description as the README's opening and in its manifest, and a color of its own. paude's arcade passes the game's title and idea, and its rules have Claude keep the README's opening saying what the game is as it grows.
 
@@ -61,6 +71,8 @@ A game made with web-game-framework's `new-game` starts with its face already: i
 Each exposed game gets a slot, and keeps it, so its address is the same every game night: slot 1 is `https://<public-host>:9101`, and so on. **Open to the internet** starts an SSH reverse tunnel from the htpc to `127.0.0.1:1910N` on the VPS, as a systemd unit of its own that reconnects when the connection drops. **Close**, turning the game off, or **Close everything to the internet** in the toolbar takes it down.
 
 The VPS is set up by dotfiles' `vps` profile: its `dot-update.d/caddy` gives each slot a site on its public port, proxying to the tunnel's loopback port, and answering "This game isn't open right now" while there's no tunnel, with the same short-lived IP certificate as paude there, and opens the ports in its firewall. Nothing on the VPS changes when a game opens or closes. The htpc's user needs to `ssh vps` without a password, as priv-config's keys and ssh config give it: the tunnels run with `BatchMode`, so a prompt is a failure, and the card says the VPS can't be reached.
+
+A hub running on the VPS itself (paude's own copy there) is given `MOTHER_HUB_VPS_HOST=local`: its "tunnels" are then forwards on the VPS's own loopback, to the same Caddy ports, with no ssh.
 
 The tunnels listen on the VPS's loopback only, so a game is reachable from outside through Caddy and nothing else.
 
