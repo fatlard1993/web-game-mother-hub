@@ -53,6 +53,28 @@ export const createUnits = ({ run, home = os.homedir(), bun = process.execPath }
 		return Number(/PORT=(\d+)/.exec(text)?.[1] ?? /--port (\d+)/.exec(text)?.[1]) || null;
 	};
 
+	// The port a running unit's processes are listening on: the truth for a game already running when the hub first
+	// meets it, whatever its package says (or doesn't). The lowest, when it listens on more than one.
+	const listeningPort = async name => {
+		const { output: group } = await systemctl('show', name, '--property=ControlGroup', '--value');
+		const pids = new Set(
+			(await readFile(path.join('/sys/fs/cgroup', group.trim(), 'cgroup.procs'), 'utf8').catch(() => ''))
+				.split('\n')
+				.filter(Boolean),
+		);
+
+		if (pids.size === 0) return null;
+
+		const { output } = await run(['ss', '-ltnpH']);
+		const ports = output
+			.split('\n')
+			.filter(line => [...line.matchAll(/pid=(\d+)/g)].some(([, pid]) => pids.has(pid)))
+			.map(line => Number(/:(\d+)\s/.exec(line)?.[1]))
+			.filter(Boolean);
+
+		return ports.length > 0 ? Math.min(...ports) : null;
+	};
+
 	// A game that takes PORT gets it in the environment; one that takes --port gets it on the command line, and only
 	// when it isn't the port it starts on by itself, so a house game needs no drop-in at all
 	const writePort = async (name, { port, portVia, defaultPort }) => {
@@ -129,6 +151,7 @@ export const createUnits = ({ run, home = os.homedir(), bun = process.execPath }
 	return {
 		state,
 		portOf,
+		listeningPort,
 		startGame,
 		startTunnel,
 		stop,

@@ -289,8 +289,15 @@ export const createHub = ({
 			throw new ValidationError(`The hub runs games from folders in ${projectsRoot}, as bun-server@ does`);
 		if (games()[record.id]) throw new ValidationError(`${games()[record.id].name} is already here`);
 
-		// A port given it already, by shelf-game's drop-in, is kept; otherwise one is handed out
-		record.port ??= (await units.portOf(gameUnit(record.id))) ?? freePort();
+		// A port given it already is kept: one asked for here, else shelf-game's drop-in, else the one it's running on
+		// now, else the one its package names; only a game with none of those is handed one
+		const dropIn = await units.portOf(gameUnit(record.id));
+		const listening = await units.listeningPort(gameUnit(record.id));
+
+		// A house game running on its own with no drop-in is running on its own default
+		if (record.portVia === 'flag' && record.defaultPort == null && !dropIn) record.defaultPort = listening;
+
+		record.port = overrides.port ?? dropIn ?? listening ?? detected.port ?? freePort();
 		checkPort(record.port, record.id);
 
 		db.data.ignored = ignored().filter(id => id !== record.id);

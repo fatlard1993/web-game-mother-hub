@@ -37,6 +37,10 @@ const fakeUnits = () => {
 			};
 		},
 		portOf: async name => ports.get(name) ?? null,
+		listening: new Map(),
+		listeningPort: async function (name) {
+			return this.listening.get(name) ?? null;
+		},
 		instances: async () => known,
 		startGame: async (id, settings) => {
 			calls.push(['start', `bun-server@${id}`, settings]);
@@ -489,6 +493,18 @@ describe('living with dotfiles', () => {
 			['humanity', 8032],
 			['sand-sorter', 3100],
 		]);
+	});
+
+	test("a running game is listed on the port it's really listening on, which becomes its own when nothing else says", async () => {
+		const { hub, units } = setup();
+
+		await makeGame('sorcery');
+		units.known.push('sorcery');
+		units.listening.set('bun-server@sorcery', 3040);
+
+		const [game] = await hub.list();
+
+		expect(game).toMatchObject({ port: 3040, defaultPort: 3040 });
 	});
 
 	test('an update installs frozen when the game has a lockfile, and builds what is there when nothing upstream', async () => {
