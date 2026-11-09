@@ -141,7 +141,8 @@ export const createHub = ({
 	const step = async (log, argv, cwd) => {
 		log(`$ ${argv.join(' ')}`);
 
-		const { code } = await run(argv, { cwd, onLine: log });
+		// Steps run the game's own scripts (install, build) and the names refresh: none of them gets the hub's secrets
+		const { code } = await run(argv, { cwd, onLine: log, plain: true });
 
 		if (code !== 0) throw new Error(`${argv.slice(0, 3).join(' ')} failed (exit ${code})`);
 	};

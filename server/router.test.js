@@ -133,3 +133,16 @@ test("paude's token hosts games; a wrong one is refused", async () => {
 	expect(await (await host('paude-secret-token')).json()).toEqual({ needsBundle: true });
 	expect((await host('paude-secret-tokex')).status).toBe(401);
 });
+
+test("a game's install and build scripts get none of the hub's secrets", async () => {
+	const { plainEnvironment } = await import('./run');
+	const plain = plainEnvironment({
+		PATH: '/bin',
+		HOME: '/h',
+		MOTHER_HUB_PASSWORD: 'p',
+		MOTHER_HUB_TOKEN: 't',
+		SECRET: 's',
+	});
+
+	expect(plain).toEqual({ PATH: '/bin', HOME: '/h' });
+});
