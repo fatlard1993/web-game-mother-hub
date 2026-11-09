@@ -27,8 +27,7 @@ const jsonObject = async request => {
 
 export const createRouter = ({ hub, auth, projectsRoot }) => {
 	const session = async (request, server) => {
-		if (requestMatch('GET', '/api/session', request))
-			return Response.json({ loggedIn: auth.isLoggedIn(request, server) });
+		if (requestMatch('GET', '/api/session', request)) return Response.json({ loggedIn: auth.isLoggedIn(request) });
 
 		if (requestMatch('POST', '/api/session', request)) {
 			const address = server?.requestIP(request)?.address || 'unknown';
@@ -137,7 +136,7 @@ export const createRouter = ({ hub, auth, projectsRoot }) => {
 		const answered = await session(request, server);
 		if (answered) return answered;
 
-		if (!auth.isLoggedIn(request, server)) return Response.json({ error: 'Log in first' }, { status: 401 });
+		if (!auth.isLoggedIn(request)) return Response.json({ error: 'Log in first' }, { status: 401 });
 
 		return (await api(request)) ?? Response.json({ error: 'Not found' }, { status: 404 });
 	};

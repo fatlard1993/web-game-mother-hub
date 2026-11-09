@@ -1,5 +1,5 @@
 import { existsSync } from 'fs';
-import { mkdir, mkdtemp, readdir, rm, writeFile } from 'fs/promises';
+import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
@@ -11,14 +11,19 @@ let root;
 
 const fakeDb = () => ({ data: { games: {} }, write: async () => {} });
 
-// A systemd that keeps its units in a map: started is active and enabled, stopped is neither
+// A systemd that keeps its units in a map: started is active and enabled, stopped is neither. Games are bun-server@
+// instances, as dotfiles runs them; tunnels are the hub's own.
 const fakeUnits = () => {
 	const units = new Map();
 	const calls = [];
+	const ports = new Map();
+	const known = [];
 
 	return {
 		units,
 		calls,
+		ports,
+		known,
 		state: async name => {
 			const unit = units.get(name);
 
@@ -31,7 +36,13 @@ const fakeUnits = () => {
 				since: null,
 			};
 		},
-		start: async (name, definition) => {
+		portOf: async name => ports.get(name) ?? null,
+		instances: async () => known,
+		startGame: async (id, settings) => {
+			calls.push(['start', `bun-server@${id}`, settings]);
+			units.set(`bun-server@${id}`, { active: true, settings });
+		},
+		startTunnel: async (name, definition) => {
 			calls.push(['start', name, definition]);
 			units.set(name, { active: true, definition });
 		},
@@ -40,7 +51,7 @@ const fakeUnits = () => {
 			if (units.has(name)) units.get(name).active = false;
 		},
 		restart: async name => calls.push(['restart', name]),
-		remove: async name => {
+		removeTunnel: async name => {
 			calls.push(['remove', name]);
 			units.delete(name);
 		},
@@ -48,14 +59,20 @@ const fakeUnits = () => {
 	};
 };
 
-const makeGame = async (name, { scaffold = false, scripts = {} } = {}) => {
+const makeGame = async (name, { scaffold = false, scripts = {}, description } = {}) => {
 	const dir = path.join(root, name);
 
 	await mkdir(path.join(dir, scaffold ? '.' : 'server'), { recursive: true });
 	await writeFile(path.join(dir, scaffold ? 'server.js' : 'server/index.js'), '');
 	await writeFile(
 		path.join(dir, 'package.json'),
-		JSON.stringify({ name, scripts: { start: 'bun x', build: 'vbc-build', ...scripts } }),
+		JSON.stringify({
+			name,
+			description,
+			scripts: { start: 'bun x', build: 'vbc-build', ...scripts },
+			// A scaffold game is on the framework, which is how it's known for a game
+			dependencies: scaffold ? { '@fatlard1993/web-game-framework': 'x' } : {},
+		}),
 	);
 
 	return dir;
@@ -69,6 +86,8 @@ const setup = ({ run = async () => ({ code: 0, output: '' }), exposure = {}, sho
 		run,
 		probe: async () => ({ ok: true }),
 		shots,
+		projectsRoot: root,
+		selfId: 'web-game-mother-hub',
 		hubDir: '/hub',
 		resetsDir: path.join(root, 'resets'),
 		exposure: {
@@ -145,7 +164,7 @@ describe('adding', () => {
 });
 
 describe('running', () => {
-	test('a house app is started with --port, a scaffold game with PORT', async () => {
+	test('a game is started as its bun-server@ instance, a house app on its own port, a scaffold game on PORT', async () => {
 		const { hub, units } = setup();
 		const app = await hub.add({ dir: await makeGame('app', { scripts: { 'service:enable': 'x --port 1040' } }) });
 		const scaffold = await hub.add({ dir: await makeGame('kid-game', { scaffold: true }) });
@@ -153,16 +172,8 @@ describe('running', () => {
 		await hub.turnOn(app.id).done;
 		await hub.turnOn(scaffold.id).done;
 
-		expect(units.units.get('app').definition).toMatchObject({
-			entry: 'server/index.js',
-			args: ['--port', '1040'],
-			env: {},
-		});
-		expect(units.units.get('kid-game').definition).toMatchObject({
-			entry: 'server.js',
-			args: [],
-			env: { PORT: '4100' },
-		});
+		expect(units.units.get('bun-server@app').settings).toEqual({ port: 1040, portVia: 'flag', defaultPort: 1040 });
+		expect(units.units.get('bun-server@kid-game').settings).toEqual({ port: 4100, portVia: 'env', defaultPort: null });
 	});
 
 	test('a second operation while one runs is refused', async () => {
@@ -178,6 +189,7 @@ describe('running', () => {
 
 		expect(() => hub.reset(id)).toThrow('Slow is busy: update');
 
+		while (!finish) await Bun.sleep(1);
 		finish();
 		await done;
 	});
@@ -209,7 +221,7 @@ describe('running', () => {
 			'bun install',
 			'bun run build',
 		]);
-		expect(units.calls.at(-1)).toEqual(['restart', 'game']);
+		expect(units.calls.at(-1)).toEqual(['restart', 'bun-server@game']);
 	});
 });
 
@@ -283,7 +295,7 @@ describe('exposing', () => {
 		const { hub } = setup({ exposure: { sshHost: null, publicHost: null } });
 		const { id } = await hub.add({ dir: await makeGame('app') });
 
-		expect((await hub.expose(id).done).error).toContain('--vps-host and --public-host');
+		expect((await hub.expose(id).done).error).toContain('MOTHER_HUB_VPS_HOST and MOTHER_HUB_PUBLIC_HOST');
 	});
 
 	test('closing everything stops every tunnel', async () => {
@@ -315,61 +327,23 @@ describe('exposing', () => {
 	});
 });
 
-test('forgetting a game removes the unit the hub made for it, and its tunnel', async () => {
+test("forgetting a game removes its tunnel, leaves dotfiles' unit as it is, and isn't undone by discovery", async () => {
 	const { hub, units } = setup();
 	const { id } = await hub.add({ dir: await makeGame('app') });
 
-	await hub.turnOn(id).done;
-	await hub.forget(id);
-
-	expect(units.calls.filter(([verb]) => verb === 'remove')).toEqual([
-		['remove', 'mother-hub-tunnel-app'],
-		['remove', 'app'],
-	]);
-	expect(await hub.list()).toEqual([]);
-});
-
-test("forgetting a game leaves a unit it didn't make: one from the game's own service:enable", async () => {
-	const { hub, units } = setup();
-	const { id } = await hub.add({ dir: await makeGame('app') });
-
-	units.units.set('app', { active: true });
 	await hub.turnOn(id).done;
 	await hub.forget(id);
 
 	expect(units.calls.filter(([verb]) => verb === 'remove')).toEqual([['remove', 'mother-hub-tunnel-app']]);
-});
+	expect(units.units.get('bun-server@app').active).toBe(true);
 
-test('forgetting a game never started touches no unit of its name', async () => {
-	const { hub, units } = setup();
-	const { id } = await hub.add({ dir: await makeGame('app') });
-
-	await hub.forget(id);
-
-	expect(units.calls).toEqual([['remove', 'mother-hub-tunnel-app']]);
-});
-
-test("a game's card follows the name in its manifest, until it's renamed in the hub", async () => {
-	const { hub } = setup();
-	const dir = await makeGame('dino');
-	const manifest = name => writeFile(path.join(dir, 'client/manifest.json'), JSON.stringify({ name }));
-
-	await mkdir(path.join(dir, 'client'));
-	await manifest('Dino Dash');
-
-	const { id } = await hub.add({ dir });
-
-	await manifest('Dino Dash 2');
-	expect((await hub.get(id)).name).toBe('Dino Dash 2');
-
-	await hub.edit(id, { name: 'Sunday Dinos' });
-	await manifest('Dino Dash 3');
-	expect((await hub.get(id)).name).toBe('Sunday Dinos');
+	units.known.push('app');
+	expect(await hub.list()).toEqual([]);
 });
 
 describe('finding games', () => {
 	test("a house app with no db:clean still has its save file found in its server's default", async () => {
-		const dir = await makeGame('humanity');
+		const dir = await makeGame('humanity', { description: 'A card game for terrible people' });
 
 		await writeFile(path.join(dir, 'server/server.js'), "defaultValue: path.join(os.homedir(), '.humanity.json'),");
 
@@ -484,5 +458,86 @@ describe('live pictures', () => {
 		const { id } = await hub.add({ dir: await makeGame('app') });
 
 		await expect(hub.photograph(id)).rejects.toThrow('App is off');
+	});
+});
+
+describe('living with dotfiles', () => {
+	test("a game outside the projects folder is refused: bun-server@ runs only ~/Projects' folders", async () => {
+		const elsewhere = await mkdtemp(path.join(os.tmpdir(), 'elsewhere-'));
+
+		await mkdir(path.join(elsewhere, 'server'), { recursive: true });
+		await writeFile(path.join(elsewhere, 'server/index.js'), '');
+		await writeFile(path.join(elsewhere, 'package.json'), JSON.stringify({ name: 'x', scripts: { start: 'x' } }));
+
+		await expect(setup().hub.add({ dir: elsewhere })).rejects.toThrow('runs games from folders in');
+		await rm(elsewhere, { recursive: true, force: true });
+	});
+
+	test("the bun-server@ units' games are listed on their own, keeping a port shelf-game gave, and never the hub", async () => {
+		const { hub, units } = setup();
+
+		await makeGame('humanity', { scripts: { 'service:enable': 'x --port 8032' } });
+		await makeGame('sand-sorter', { scaffold: true });
+		await makeGame('web-game-mother-hub');
+		units.known.push('humanity', 'sand-sorter', 'web-game-mother-hub', 'not-a-folder');
+		units.ports.set('bun-server@sand-sorter', 3100);
+
+		const listed = await hub.list();
+
+		expect(listed.map(game => [game.id, game.port])).toEqual([
+			['humanity', 8032],
+			['sand-sorter', 3100],
+		]);
+	});
+
+	test('an update installs frozen when the game has a lockfile, and builds what is there when nothing upstream', async () => {
+		const ran = [];
+		const run = async argv => {
+			ran.push(argv.join(' '));
+
+			return { code: argv.includes('@{u}') ? 128 : 0, output: '' };
+		};
+		const { hub } = setup({ run });
+		const dir = await makeGame('kid-game', { scaffold: true });
+
+		await writeFile(path.join(dir, 'bun.lock'), '');
+
+		const { id } = await hub.add({ dir });
+		const operation = await hub.update(id).done;
+
+		expect(operation.ok).toBe(true);
+		expect(operation.lines).toContain('No upstream to pull from; building what is here');
+		expect(ran.filter(command => !command.includes(' -C '))).toEqual([
+			'bun install --frozen-lockfile',
+			'bun run build',
+		]);
+	});
+
+	test("a save that's a link into somewhere else is left where it is by a reset", async () => {
+		const { hub } = setup();
+		const kept = path.join(root, 'kept.json');
+		const dir = await makeGame('linked', { description: 'A game of links' });
+		const save = path.join(root, 'linked-save.json');
+
+		await writeFile(kept, '{}');
+		await symlink(kept, save);
+
+		const { id } = await hub.add({ dir });
+
+		await hub.edit(id, { databases: [save] });
+
+		const operation = await hub.reset(id).done;
+
+		expect(operation.ok).toBe(true);
+		expect(operation.lines.join('\n')).toContain('is a link to a file kept elsewhere');
+		expect(existsSync(save)).toBe(true);
+	});
+
+	test("a house app that isn't a game has no saves to reset (game-night's library)", async () => {
+		const dir = await makeGame('game-night', { description: 'A searchable library of games' });
+
+		await writeFile(path.join(dir, 'server/index.js'), "defaultValue: path.join(os.homedir(), '.gameNight.json'),");
+
+		expect((await setup().hub.add({ dir })).databases).toEqual([]);
 	});
 });

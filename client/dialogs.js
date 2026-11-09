@@ -44,7 +44,7 @@ export const settingsDialog = (game, onChanged) =>
 		deleteLabel: 'Forget',
 		confirmDelete: {
 			header: `Forget ${game.name}?`,
-			body: 'It is closed to the internet, and turned off and its service removed if the hub made it. Nothing in its folder is touched.',
+			body: 'It comes off this page and is closed to the internet. Its unit stays as it is, on or off, and nothing in its folder is touched.',
 			confirmLabel: 'Forget it',
 		},
 		onDelete: async () => {

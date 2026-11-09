@@ -26,7 +26,6 @@
 		"lint": "bun --bun eslint",
 		"lint:fix": "bun --bun eslint --fix",
 		"format": "bun run lint:fix && bun --bun prettier --write .",
-		"vps:caddyfile": "bun scripts/vpsCaddyfile.js",
 		"deploy": "bun run build && bun run service:reload",
 		"service:enable": "vbc-service enable --port 8036 --description \"Web game mother hub\"",
 		"service:disable": "vbc-service disable",

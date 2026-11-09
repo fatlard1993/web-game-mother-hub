@@ -1,5 +1,6 @@
 #!/usr/bin/env bun
 
+import { readFileSync, statSync } from 'fs';
 import os from 'os';
 import path from 'path';
 
@@ -15,9 +16,13 @@ import { createUnits } from './units';
 
 handleExit();
 
+// Each setting is a flag, or under bun-server@ (which runs plain `bun run start`) an environment variable, which
+// dotfiles' mother-hub drop-in reads from the env file priv-config keeps
+const env = process.env;
+
 const { options } = new Argi({
 	options: {
-		port: { type: 'number', alias: 'p', defaultValue: 8036 },
+		port: { type: 'number', alias: 'p', defaultValue: Number(env.MOTHER_HUB_PORT) || 8036 },
 		database: {
 			type: 'string',
 			alias: 'd',
@@ -32,9 +37,19 @@ const { options } = new Argi({
 		password: { type: 'string', description: 'The password for this page (or set MOTHER_HUB_PASSWORD)' },
 		'vps-host': {
 			type: 'string',
+			defaultValue: env.MOTHER_HUB_VPS_HOST,
 			description: 'The VPS games are exposed through, as ssh knows it (a Host in ~/.ssh/config)',
 		},
-		'public-host': { type: 'string', description: "The VPS's public address, as players will type it" },
+		'public-host': {
+			type: 'string',
+			defaultValue: env.MOTHER_HUB_PUBLIC_HOST,
+			description: "The VPS's public address, as players will type it",
+		},
+		'lan-names': {
+			type: 'string',
+			defaultValue: env.MOTHER_HUB_LAN_NAMES || path.join(os.homedir(), '.config', 'lan-names.urls'),
+			description: "Each service's address on the LAN, a `port url` line apiece (dotfiles' lan-names writes it)",
+		},
 		'public-port-base': { type: 'number', defaultValue: 9100, description: 'Exposed games get the ports after this' },
 		'tunnel-port-base': {
 			type: 'number',
@@ -47,11 +62,33 @@ const { options } = new Argi({
 
 const db = await openDatabase({ path: options.database, defaults: { games: {} } });
 
-const auth = await createAuth({
-	db,
-	password: options.password || process.env.MOTHER_HUB_PASSWORD,
-	tokenFile: path.join(path.dirname(db.path), '.web-game-mother-hub-token'),
-});
+const auth = await createAuth({ db, password: options.password || env.MOTHER_HUB_PASSWORD });
+
+// The LAN's names for what this machine serves, read again when the file changes (lan-names regenerates it)
+let lanNames = { at: 0, urls: new Map() };
+
+const lanUrl = port => {
+	const changed = (() => {
+		try {
+			return statSync(options['lan-names']).mtimeMs;
+		} catch {
+			return 0;
+		}
+	})();
+
+	if (changed !== lanNames.at) {
+		const text = changed ? readFileSync(options['lan-names'], 'utf8') : '';
+
+		lanNames = {
+			at: changed,
+			urls: new Map([...text.matchAll(/^(\d+)\s+(https?:\/\/\S+)$/gm)].map(([, at, url]) => [Number(at), url])),
+		};
+	}
+
+	return lanNames.urls.get(port) ?? null;
+};
+
+const hubDir = path.resolve(import.meta.dir, '..');
 
 const probe = async (url, timeout) => {
 	try {
@@ -70,7 +107,11 @@ const hub = createHub({
 	run,
 	probe,
 	shots: createShots({ dir: path.join(path.dirname(db.path), '.web-game-mother-hub-shots'), run }),
-	hubDir: path.resolve(import.meta.dir, '..'),
+	projectsRoot: path.resolve(options.projects),
+	// The hub runs as bun-server@<its folder> on the htpc, and isn't one of the games
+	selfId: path.basename(hubDir),
+	lanUrl,
+	hubDir,
 	resetsDir: path.join(path.dirname(db.path), '.web-game-mother-hub-resets'),
 	exposure: {
 		sshHost: options['vps-host'] ?? null,

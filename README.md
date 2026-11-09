@@ -6,51 +6,38 @@ Games run on the htpc. Opening one to the internet carries it out through the VP
 
 ## Setup
 
-Needs [Bun](https://bun.sh), on Linux with systemd (the htpc).
+The hub lives on the htpc beside the games, and [dotfiles](https://github.com/fatlard1993/dotfiles)' `htpc` profile sets it up with the rest: `profiles/htpc/dot-update.d/mother-hub` clones it to `~/Projects/web-game-mother-hub` and runs it as `bun-server@web-game-mother-hub`, the template unit the games run as, and `lan-names` serves it at `https://hub.home`. Its settings come from the environment, in `~/.config/web-game-mother-hub.env`, which priv-config keeps:
 
-```sh
-bun install
-bun start -- --password 'something'     # http://htpc:8036
-```
+| Variable | Flag | Default |  |
+| --- | --- | --- | --- |
+| `MOTHER_HUB_PASSWORD` | `--password` | printed once on first run | every device logs in once |
+| `MOTHER_HUB_VPS_HOST` | `--vps-host` |  | the VPS as ssh knows it, a `Host` in `~/.ssh/config` |
+| `MOTHER_HUB_PUBLIC_HOST` | `--public-host` |  | the VPS's address as players type it |
+| `MOTHER_HUB_LAN_NAMES` | `--lan-names` | `~/.config/lan-names.urls` | each service's LAN address, as `lan-names` writes it |
+| `MOTHER_HUB_PORT` | `--port` | `8036` | where the page is served |
+|  | `--database` | `~/.web-game-mother-hub.json` | the games and their settings |
+|  | `--projects` | `~/Projects` | where the games are, as `bun-server@` runs them |
+|  | `--slots` | `8` | how many games can be open to the internet at once |
 
-`bun run service:enable` runs the hub itself as a background service on port 8036, and `bun run deploy` rebuilds and restarts it. So that the games and the hub keep running with nobody logged in, and come back after a reboot, run once:
-
-```sh
-loginctl enable-linger $USER
-```
-
-| Option               | Default                       |                                                          |
-| -------------------- | ----------------------------- | -------------------------------------------------------- |
-| `--port`             | `8036`                        | where the page is served                                 |
-| `--password`         | printed once on first run     | or `MOTHER_HUB_PASSWORD`; every device logs in once      |
-| `--database`         | `~/.web-game-mother-hub.json` | the games and their settings                             |
-| `--projects`         | `~/Projects`                  | where **Add a game** looks for games to offer            |
-| `--vps-host`         |                               | the VPS as ssh knows it, a `Host` in `~/.ssh/config`     |
-| `--public-host`      |                               | the VPS's address as players type it                     |
-| `--public-port-base` | `9100`                        | exposed games are on the ports after it: 9101, 9102, ... |
-| `--tunnel-port-base` | `19100`                       | each tunnel listens on the VPS's loopback, 19101, ...    |
-| `--slots`            | `8`                           | how many games can be open to the internet at once       |
-
-Give the service the VPS flags by enabling it with them: `vbc-service enable --port 8036 -- --vps-host vps --public-host 203.0.113.7`.
+Anywhere else, `bun install` and `bun start -- --password 'something'` run it on port 8036, given a `bun-server@` template unit like the htpc's.
 
 ## Games
 
-**Add a game** offers the folders under `--projects` that look like games, or takes any folder. Both kinds of game in the house are understood:
+The games are the ones dotfiles already runs: every `bun-server@<folder>` instance, from `dot-update.d/game-servers` (humanity, void-driller, sorcery-and-savagery, game-night) and from the arcade's `shelf-game`, is listed here as soon as the hub sees it. **Add a game** takes any other game folder in `~/Projects`. The hub turns those units on and off; how they're installed, run and named stays dotfiles'.
 
-- **A house app** (void-driller, humanity, sorcery-and-savagery): run as `bun server/index.js --port N`. Its port comes from its `service:enable` script, and its save file from its `db:clean` script, or else the default its server names.
-- **A web-game-framework game** (what paude's arcade makes): run as `bun server.js` with `PORT` set, given a port from 4100 up, saving in its `data/games.json`.
+- **A house app** takes `--port`, and runs on its own port with nothing added. Its save file comes from its `db:clean` script, or else the default its server names.
+- **A web-game-framework game** (what the arcade makes) takes `PORT`, from the `port.conf` drop-in `shelf-game` writes. The hub writes the same file, so a game's port is kept in one place. One with no port yet is given one from 4100 up.
 
-Port and save files can be changed in a game's settings (the gear).
+Only a game has saves to reset: a house app that isn't one (game-night's library) has none, and a save that's a link into somewhere else (priv-config keeps the library) is never moved.
 
-Each game runs as a systemd user unit named for the game: the same unit its own `bun run service:enable` makes. A game already running that way is taken over rather than doubled, and forgetting it in the hub leaves that unit alone. Units keep running through the hub's own restarts.
-
-- **Turn on / Turn off** starts the unit and keeps it starting at boot, or stops it and keeps it stopped.
-- **Update** runs `git pull --ff-only`, `bun install` and the build, then restarts the game if it was running. When a step fails it stops there, and the game keeps running the code it had.
+- **Turn on / Turn off** enables and starts the game's unit, or stops and disables it. dotfiles' game-servers starts a game when it first installs it, and after that leaves on and off to the hub.
+- **Update** pulls (`--ff-only`), installs with `--frozen-lockfile` as dotfiles does, so `bun.lock` is never rewritten under a pull, builds, and restarts the game if it was running. An arcade game shelved from the folder it's built in has nothing to pull from, so what's there is built. When a step fails it stops there, and the game keeps running the code it had.
 - **Check for updates** fetches, so the card shows how many commits are waiting upstream.
 - **Reset** stops the game, moves its save files to `~/.web-game-mother-hub-resets/<game>/<time>/`, and starts it again. Regretted, it's a folder to move back.
 - **Logs** shows the game's journal, and its tunnel's for an exposed game.
+- **Forget** (in a game's settings) takes it off this page and closes its tunnel; its unit is left as it is, on or off.
 
-The light by each name says whether it's running and answering on its port, starting, crashing (with how many restarts), or running without answering.
+The light by each name says whether it's running and answering on its port, starting, crashing (with how many restarts), or running without answering. Each card links to the game at its `.home` name when `lan-names` gave it one.
 
 ## How a game shows on its card
 
@@ -63,15 +50,7 @@ A game says how it looks and how it's doing itself; the hub only reads it.
 
 ## From paude's arcade
 
-A game made in paude's arcade comes here when it's shelved. Point paude's shelf at the hub's script, in `~/.config/paude/server.json`:
-
-```json
-{ "arcade": { "shelf": "bun ~/Projects/web-game-mother-hub/scripts/shelve.js {path} {port}" } }
-```
-
-Shelving clones the game out of the folder it's being built in, to `~/.web-game-mother-hub-games/<game>`, so the hub runs its own copy with its own saves while the building goes on. The clone's origin is that folder, so the game's **Update** brings in whatever was built since (and **Check for updates** says how much that is). It's added at the port paude picked, installed, built and turned on. Shelving the same game again updates it.
-
-The script reaches the hub with a token the hub keeps in `~/.web-game-mother-hub-token`, readable only by its user and honored only from this machine. `MOTHER_HUB_URL`, `MOTHER_HUB_TOKEN_FILE` and `MOTHER_HUB_GAMES` point it elsewhere.
+A game shelved in paude's arcade on the htpc (dotfiles' `shelf-game`, paude's `arcade.shelf`) becomes a `bun-server@` unit with a `.home` name, and so a card here, with nothing more to do.
 
 A game made with web-game-framework's `new-game` starts with its face already: its title, its description as the README's opening and in its manifest, and a color of its own. paude's arcade passes the game's title and idea, and its rules have Claude keep the README's opening saying what the game is as it grows.
 
@@ -79,18 +58,7 @@ A game made with web-game-framework's `new-game` starts with its face already: i
 
 Each exposed game gets a slot, and keeps it, so its address is the same every game night: slot 1 is `https://<public-host>:9101`, and so on. **Open to the internet** starts an SSH reverse tunnel from the htpc to `127.0.0.1:1910N` on the VPS, as a systemd unit of its own that reconnects when the connection drops. **Close**, turning the game off, or **Close everything to the internet** in the toolbar takes it down.
 
-The VPS needs setting up once:
-
-1. The htpc's user can `ssh vps` without a password (a key, with `Host vps` in `~/.ssh/config`). The tunnels run with `BatchMode`, so a passphrase prompt is a failure, and the card says the VPS can't be reached.
-2. Caddy on the VPS, with a site for each slot. This prints them:
-
-   ```sh
-   bun run vps:caddyfile -- --public-host 203.0.113.7 > Caddyfile
-   ```
-
-   Each public port proxies to its tunnel's loopback port, and answers "This game isn't open right now" while there's no tunnel. A bare IP is certified on Let's Encrypt's short-lived profile, and a domain name the usual way. Nothing on the VPS changes when a game opens or closes.
-
-3. The VPS's firewall lets in 80 and 443 (for the certificates) and the public ports, 9101 to 9108.
+The VPS is set up by dotfiles' `vps` profile: its `dot-update.d/caddy` gives each slot a site on its public port, proxying to the tunnel's loopback port, and answering "This game isn't open right now" while there's no tunnel, with the same short-lived IP certificate as paude there, and opens the ports in its firewall. Nothing on the VPS changes when a game opens or closes. The htpc's user needs to `ssh vps` without a password, as priv-config's keys and ssh config give it: the tunnels run with `BatchMode`, so a prompt is a failure, and the card says the VPS can't be reached.
 
 The tunnels listen on the VPS's loopback only, so a game is reachable from outside through Caddy and nothing else.
 

@@ -287,7 +287,9 @@ export default class GameCard extends StyledCard {
 		const open = exposureState(game);
 		const busy = state.key === 'busy';
 		const on = game.unit.active || game.unit.state === 'auto-restart';
-		const lanUrl = `http://${location.hostname}:${game.port}`;
+		// Its name on the LAN when dotfiles' lan-names gave it one, else this machine's address and its port
+		const lanUrl = game.lanUrl ?? `http://${location.hostname}:${game.port}`;
+		const lanLabel = game.lanUrl ? new URL(game.lanUrl).host : `:${game.port}`;
 
 		this.elem.style.setProperty('--game-color', game.look.color);
 		if (!on) this.addClass('off');
@@ -328,7 +330,7 @@ export default class GameCard extends StyledCard {
 						new Elem({ tag: 'span', textContent: state.label }),
 					],
 				}),
-				game.unit.active && new Elem({ tag: 'a', href: lanUrl, target: '_blank', textContent: `:${game.port}` }),
+				game.unit.active && new Elem({ tag: 'a', href: lanUrl, target: '_blank', textContent: lanLabel }),
 			].filter(Boolean),
 		});
 

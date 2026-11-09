@@ -1,4 +1,4 @@
-import { existsSync, statSync } from 'fs';
+import { existsSync, lstatSync, statSync } from 'fs';
 import { mkdir, rename } from 'fs/promises';
 import path from 'path';
 
@@ -7,7 +7,7 @@ import { ValidationError } from '@vanilla-bean/components/app';
 import { detectGame } from './detect';
 import { readDocs } from './docs';
 import { readLook } from './look';
-import { tunnelUnit } from './units';
+import { gameUnit, tunnelUnit } from './units';
 
 // Ports handed to games that don't come with one of their own (the scaffold's games). Kept clear of paude's arcade
 // shelf (3100-3999), so a game the arcade is still building and one served here never fight over a port.
@@ -17,6 +17,8 @@ const HEALTH_TIMEOUT_MS = 1500;
 const OPERATION_LINES = 400;
 // What leaves a game freshly started, and so worth a new picture of
 const FRESH_STARTS = ['turn on', 'restart', 'update', 'reset'];
+// How often the bun-server@ units are looked through for games the hub hasn't met
+const DISCOVER_MS = 30_000;
 // How long a started game is given to answer before its picture is given up on
 const START_WAIT_MS = 30_000;
 // The live picture's path among a game's pictures, for choosing it as the cover
@@ -41,6 +43,9 @@ export const createHub = ({
 	run,
 	probe,
 	shots = null,
+	projectsRoot,
+	selfId = null,
+	lanUrl = () => null,
 	hubDir,
 	resetsDir,
 	exposure,
@@ -48,6 +53,8 @@ export const createHub = ({
 	startWaitMs = START_WAIT_MS,
 }) => {
 	const games = () => db.data.games;
+	// Games forgotten here, which looking through the units mustn't bring back
+	const ignored = () => (db.data.ignored ||= []);
 	const operations = new Map();
 	const gitCache = new Map();
 
@@ -75,14 +82,6 @@ export const createHub = ({
 
 		if (holder) throw new ValidationError(`${holder.name} already uses port ${port}`);
 	};
-
-	const definition = record => ({
-		description: `${record.name} (web-game-mother-hub)`,
-		cwd: record.dir,
-		entry: record.entry,
-		args: record.portVia === 'flag' ? ['--port', String(record.port)] : [],
-		env: record.portVia === 'env' ? { PORT: String(record.port) } : {},
-	});
 
 	const tunnelPorts = slot => ({
 		public: exposure.publicPortBase + slot,
@@ -181,7 +180,7 @@ export const createHub = ({
 			const until = Date.now() + startWaitMs;
 
 			while (!(await probe(url, HEALTH_TIMEOUT_MS)).ok) {
-				if (Date.now() > until || !(await units.state(record.id)).active) return false;
+				if (Date.now() > until || !(await units.state(gameUnit(record.id))).active) return false;
 				await Bun.sleep(1000);
 			}
 
@@ -211,7 +210,7 @@ export const createHub = ({
 
 	const status = async record => {
 		const [unit, tunnel, answer, git, look, docs] = await Promise.all([
-			units.state(record.id),
+			units.state(gameUnit(record.id)),
 			record.exposeSlot ? units.state(tunnelUnit(record.id)) : null,
 			// Any answer at all means it's up; a game on the framework answers with how it's doing besides
 			probe(`http://127.0.0.1:${record.port}${STATUS_PATH}`, HEALTH_TIMEOUT_MS),
@@ -240,26 +239,24 @@ export const createHub = ({
 				...look,
 				icon: look.icon ? `/api/games/${encodeURIComponent(record.id)}/icon?v=${look.iconVersion}` : null,
 			},
+			// Its name on the LAN (dotfiles' lan-names), else its port on this machine's
+			lanUrl: lanUrl(record.port),
 			publicUrl: record.exposed ? publicUrl(record) : null,
 			operation: operation && { ...operation, lines: operation.lines.slice(-60) },
 		};
 	};
 
-	// The first start notes whether the game's unit was the hub's to make or already there (made by the game's own
-	// `service:enable`), so forgetting the game takes away only what the hub put there
-	const startGame = async (record, log) => {
-		if (!record.unitOrigin) {
-			record.unitOrigin = (await units.state(record.id)).installed ? 'adopted' : 'hub';
-			await db.write();
-		}
-
-		await units.start(record.id, definition(record), log);
-	};
+	const startGame = (record, log) =>
+		units.startGame(
+			record.id,
+			{ port: record.port, portVia: record.portVia, defaultPort: record.defaultPort ?? null },
+			log,
+		);
 
 	const startTunnel = async (record, log) => {
 		const ports = tunnelPorts(record.exposeSlot);
 
-		await units.start(
+		await units.startTunnel(
 			tunnelUnit(record.id),
 			{
 				description: `${record.name} exposed on the VPS at :${ports.public} (web-game-mother-hub)`,
@@ -271,8 +268,62 @@ export const createHub = ({
 		);
 	};
 
+	const add = async (dir, overrides = {}) => {
+		const detected = await detectGame(dir);
+		const { title } = await readLook(detected);
+		const record = {
+			...detected,
+			// The name the game gives itself, in its manifest or page title, over one made from its folder
+			name: title ?? detected.name,
+			// A house game's own port, which it runs on with no drop-in
+			defaultPort: detected.portVia === 'flag' ? detected.port : null,
+			...pick(overrides, ['name', 'port', 'databases']),
+			exposed: false,
+			exposeSlot: null,
+		};
+
+		// bun-server@<folder> runs ~/Projects/<folder>, so that's where a game the hub runs lives
+		if (path.dirname(record.dir) !== projectsRoot)
+			throw new ValidationError(`The hub runs games from folders in ${projectsRoot}, as bun-server@ does`);
+		if (games()[record.id]) throw new ValidationError(`${games()[record.id].name} is already here`);
+
+		// A port given it already, by shelf-game's drop-in, is kept; otherwise one is handed out
+		record.port ??= (await units.portOf(gameUnit(record.id))) ?? freePort();
+		checkPort(record.port, record.id);
+
+		db.data.ignored = ignored().filter(id => id !== record.id);
+		games()[record.id] = record;
+		await db.write();
+
+		return status(record);
+	};
+
+	// The bun-server@ units systemd knows, the games dotfiles' game-servers runs and the arcade's shelf-game puts there,
+	// each listed here as soon as it's seen, unless it was forgotten here
+	let discoveredAt = 0;
+
+	const discover = async () => {
+		if (Date.now() - discoveredAt < DISCOVER_MS) return;
+
+		discoveredAt = Date.now();
+
+		for (const id of await units.instances()) {
+			if (games()[id] || ignored().includes(id) || id === selfId) continue;
+
+			const dir = path.join(projectsRoot, id);
+
+			if (!existsSync(path.join(dir, 'package.json'))) continue;
+
+			await add(dir).catch(error => console.warn(`Not listing bun-server@${id}: ${error.message}`));
+		}
+	};
+
 	return {
-		list: async () => Promise.all(Object.values(games()).map(status)),
+		list: async () => {
+			await discover();
+
+			return Promise.all(Object.values(games()).map(status));
+		},
 
 		get: async id => status(game(id)),
 
@@ -281,30 +332,7 @@ export const createHub = ({
 			shots: !!shots?.available,
 		}),
 
-		add: async ({ dir, ...overrides }) => {
-			const detected = await detectGame(dir);
-			const { title } = await readLook(detected);
-			const record = {
-				...detected,
-				// The name the game gives itself, in its manifest or page title, over one made from its folder
-				name: title ?? detected.name,
-				...pick(overrides, ['name', 'port', 'databases']),
-				exposed: false,
-				exposeSlot: null,
-			};
-
-			if (games()[record.id]) throw new ValidationError(`${games()[record.id].name} is already here`);
-			if (Object.values(games()).some(other => other.dir === record.dir))
-				throw new ValidationError(`${record.dir} is already here`);
-
-			record.port ??= freePort();
-			checkPort(record.port, record.id);
-
-			games()[record.id] = record;
-			await db.write();
-
-			return status(record);
-		},
+		add: async ({ dir, ...overrides }) => add(dir, overrides),
 
 		edit: async (id, changes) => {
 			const record = game(id);
@@ -330,7 +358,7 @@ export const createHub = ({
 			await db.write();
 
 			// The running unit still has the old port in it; a fresh start writes the new one
-			if (portChanged && (await units.state(id)).active) {
+			if (portChanged && (await units.state(gameUnit(id))).active) {
 				await startGame(games()[id], () => {});
 				if (record.exposed) await startTunnel(games()[id], () => {});
 			}
@@ -343,10 +371,11 @@ export const createHub = ({
 
 			if (operations.get(id)?.running) throw new BusyError(`${record.name} is busy`);
 
-			await units.remove(tunnelUnit(id));
-			if (record.unitOrigin === 'hub') await units.remove(id);
+			// Its tunnel was the hub's; its bun-server@ unit is dotfiles', and stays as it is, on or off
+			await units.removeTunnel(tunnelUnit(id));
 			await shots?.forget(id);
 
+			ignored().push(id);
 			delete games()[id];
 			await db.write();
 		},
@@ -360,24 +389,33 @@ export const createHub = ({
 
 		turnOff: id =>
 			operate(id, 'turn off', async record => {
-				await units.stop(id);
+				await units.stop(gameUnit(id));
 				// Nothing to reach on the other end of a tunnel to a stopped game
 				if (record.exposed) await units.stop(tunnelUnit(id));
 			}),
 
-		restart: id => operate(id, 'restart', () => units.restart(id)),
+		restart: id => operate(id, 'restart', () => units.restart(gameUnit(id))),
 
 		// Pulls, installs and builds. Any step failing stops it there, and the running game is left alone: still the code
 		// it was started with, since it's only restarted once everything before it worked.
 		update: id =>
 			operate(id, 'update', async (record, log) => {
-				await step(log, ['git', 'pull', '--ff-only'], record.dir);
-				await step(log, ['bun', 'install'], record.dir);
+				// An arcade game shelved from the folder it's built in has nothing to pull from; what's there is built
+				const { code: tracking } = await run(['git', '-C', record.dir, 'rev-parse', '--abbrev-ref', '@{u}']);
+
+				if (tracking === 0) await step(log, ['git', 'pull', '--ff-only'], record.dir);
+				else log('No upstream to pull from; building what is here');
+
+				// Frozen, as dotfiles installs them: a plain install rewrites bun.lock when the framework drifts ahead of it,
+				// and the dirty file stops every pull after
+				const locked = ['bun.lock', 'bun.lockb'].some(file => existsSync(path.join(record.dir, file)));
+
+				await step(log, ['bun', 'install', ...(locked ? ['--frozen-lockfile'] : [])], record.dir);
 				if (record.hasBuild) await step(log, ['bun', 'run', 'build'], record.dir);
 
-				if ((await units.state(id)).active) {
+				if ((await units.state(gameUnit(id))).active) {
 					log('Restarting');
-					await units.restart(id);
+					await units.restart(gameUnit(id));
 				}
 
 				log('✓ Up to date');
@@ -395,11 +433,16 @@ export const createHub = ({
 				if (record.databases.length === 0)
 					throw new Error('No save file is known for this game; add one in its settings');
 
-				const saves = record.databases.filter(file => existsSync(file));
+				// A save that's a link is kept somewhere else on purpose (game-night's library lives in priv-config), and
+				// moving the link would only break that
+				const linked = record.databases.filter(file => existsSync(file) && lstatSync(file).isSymbolicLink());
+				const saves = record.databases.filter(file => existsSync(file) && !linked.includes(file));
 
-				const wasActive = (await units.state(id)).active;
+				for (const file of linked) log(`${file} is a link to a file kept elsewhere; leaving it`);
 
-				if (wasActive) await units.stop(id);
+				const wasActive = (await units.state(gameUnit(id))).active;
+
+				if (wasActive) await units.stop(gameUnit(id));
 
 				const aside = path.join(resetsDir, id, now().toISOString().replace(/[:.]/g, '-'));
 
@@ -420,7 +463,7 @@ export const createHub = ({
 		expose: id =>
 			operate(id, 'expose', async (record, log) => {
 				if (!exposure.sshHost || !exposure.publicHost)
-					throw new Error('Exposing needs the VPS: start the hub with --vps-host and --public-host');
+					throw new Error('Exposing needs the VPS: give the hub MOTHER_HUB_VPS_HOST and MOTHER_HUB_PUBLIC_HOST');
 
 				if (!record.exposeSlot) {
 					const taken = new Set(Object.values(games()).map(other => other.exposeSlot));
@@ -482,14 +525,14 @@ export const createHub = ({
 			const record = game(id);
 
 			if (!shots?.available) throw new ValidationError('No Chrome here to take pictures with (set CHROME)');
-			if (!(await units.state(id)).active) throw new ValidationError(`${record.name} is off`);
+			if (!(await units.state(gameUnit(id))).active) throw new ValidationError(`${record.name} is off`);
 
 			return photograph(record);
 		},
 
 		logs: async (id, lines) => {
 			const record = game(id);
-			const logs = await units.logs(id, lines);
+			const logs = await units.logs(gameUnit(id), lines);
 
 			if (!record.exposeSlot) return logs;
 

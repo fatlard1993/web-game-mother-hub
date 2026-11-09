@@ -65,6 +65,9 @@ const appDatabases = async (root, scripts) => {
 	return fromScript.length > 0 ? fromScript : serverDatabases(root);
 };
 
+const gameDatabases = (root, scripts, scaffold) =>
+	scaffold ? [path.join(root, 'data/games.json')] : appDatabases(root, scripts);
+
 export const detectGame = async dir => {
 	const root = path.resolve(expandHome(String(dir ?? '').trim()));
 	const pkg = await readPackage(root);
@@ -75,13 +78,15 @@ export const detectGame = async dir => {
 	const scaffold = !existsSync(path.join(root, 'server/index.js')) && existsSync(path.join(root, 'server.js'));
 
 	return {
-		id: gameId(pkg.name || path.basename(root)),
+		// The folder's name, which is what bun-server@ calls its unit
+		id: gameId(path.basename(root)),
 		name: titleCase(pkg.name?.replace(/^@[^/]+\//, '') || path.basename(root)),
 		dir: root,
 		entry: scaffold ? 'server.js' : 'server/index.js',
 		portVia: scaffold ? 'env' : 'flag',
 		port: scriptPort(pkg.scripts),
-		databases: scaffold ? [path.join(root, 'data/games.json')] : await appDatabases(root, pkg.scripts),
+		// Only a game's saves are a reset's to clear; a house app that isn't a game (game-night's library) has none
+		databases: looksLikeGame(pkg, root) ? await gameDatabases(root, pkg.scripts, scaffold) : [],
 		hasBuild: !!pkg.scripts.build,
 	};
 };
