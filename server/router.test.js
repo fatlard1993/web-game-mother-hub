@@ -1,3 +1,6 @@
+import { mkdtemp, readFile, stat } from 'fs/promises';
+import os from 'os';
+import path from 'path';
 import { expect, test } from 'bun:test';
 
 import { vpsCaddyfile } from '../scripts/vpsCaddyfile';
@@ -6,8 +9,8 @@ import { createRouter } from './router';
 
 const db = () => ({ data: {}, write: async () => {} });
 
-const setup = async () => {
-	const auth = await createAuth({ db: db(), password: 'hunter2' });
+const setup = async ({ tokenFile } = {}) => {
+	const auth = await createAuth({ db: db(), password: 'hunter2', tokenFile });
 	const hub = {
 		list: async () => [{ id: 'game' }],
 		turnOff: () => ({ operation: { kind: 'turn off', running: true } }),
@@ -67,4 +70,21 @@ test('the VPS Caddyfile hands each public port to its tunnel, certifying a bare 
 	expect(caddyfile).toContain('reverse_proxy 127.0.0.1:19102');
 	expect(caddyfile).toContain('profile shortlived');
 	expect(vpsCaddyfile({ publicHost: 'games.example.com', slots: 1 })).not.toContain('shortlived');
+});
+
+test('the local token logs in a script on this machine, and nothing from anywhere else', async () => {
+	const tokenFile = path.join(await mkdtemp(path.join(os.tmpdir(), 'hub-token-')), 'token');
+	const { router } = await setup({ tokenFile });
+	const token = (await readFile(tokenFile, 'utf8')).trim();
+	const from = address => ({ requestIP: () => ({ address }) });
+	const asking = value => new Request('http://hub/api/games', { headers: { authorization: `Bearer ${value}` } });
+
+	expect((await stat(tokenFile)).mode & 0o777).toBe(0o600);
+	expect((await router(asking(token), from('127.0.0.1'))).status).toBe(200);
+	expect((await router(asking(token), from('192.168.1.20'))).status).toBe(401);
+	expect((await router(asking(`${token.slice(0, -1)}x`), from('127.0.0.1'))).status).toBe(401);
+
+	// The same token is kept across restarts
+	await setup({ tokenFile });
+	expect((await readFile(tokenFile, 'utf8')).trim()).toBe(token);
 });

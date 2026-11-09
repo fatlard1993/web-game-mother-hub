@@ -22,6 +22,7 @@ export default class Hub extends Component {
 	build() {
 		this.cards = new Map();
 		this.exposure = { configured: false };
+		this.hubInfo = { shots: false };
 
 		this.closeAllButton = new Button({
 			icon: 'shield-halved',
@@ -73,7 +74,10 @@ export default class Hub extends Component {
 
 		getHub()
 			.then(response => response.json())
-			.then(({ exposure }) => (this.exposure = exposure))
+			.then(hubInfo => {
+				this.hubInfo = hubInfo;
+				this.exposure = hubInfo.exposure;
+			})
 			.finally(() => this.refresh());
 	}
 
@@ -126,7 +130,7 @@ export default class Hub extends Component {
 				exposure: this.exposure,
 				onChanged: () => this.refresh(),
 				onLogs: logsDialog,
-				onAbout: about => aboutDialog(about, () => this.refresh()),
+				onAbout: about => aboutDialog(about, () => this.refresh(), { canPhotograph: this.hubInfo.shots }),
 				onSettings: () => settingsDialog(game, () => this.refresh()),
 			});
 

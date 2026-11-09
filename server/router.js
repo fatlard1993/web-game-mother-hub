@@ -27,7 +27,8 @@ const jsonObject = async request => {
 
 export const createRouter = ({ hub, auth, projectsRoot }) => {
 	const session = async (request, server) => {
-		if (requestMatch('GET', '/api/session', request)) return Response.json({ loggedIn: auth.isLoggedIn(request) });
+		if (requestMatch('GET', '/api/session', request))
+			return Response.json({ loggedIn: auth.isLoggedIn(request, server) });
 
 		if (requestMatch('POST', '/api/session', request)) {
 			const address = server?.requestIP(request)?.address || 'unknown';
@@ -99,6 +100,17 @@ export const createRouter = ({ hub, auth, projectsRoot }) => {
 			return new Response(Bun.file(file), { headers: { 'cache-control': 'private, max-age=86400' } });
 		}
 
+		if ((match = requestMatch('GET', '/api/games/:id/shot', request))) {
+			const file = hub.shot(match.id);
+
+			if (!file) return Response.json({ error: 'No picture yet' }, { status: 404 });
+
+			return new Response(Bun.file(file), { headers: { 'cache-control': 'private, max-age=86400' } });
+		}
+
+		if ((match = requestMatch('POST', '/api/games/:id/shot', request)))
+			return Response.json({ taken: await hub.photograph(match.id) });
+
 		if ((match = requestMatch('GET', '/api/games/:id/logs', request))) {
 			const lines = Math.min(Number(new URL(request.url).searchParams.get('lines')) || 200, 2000);
 
@@ -125,7 +137,7 @@ export const createRouter = ({ hub, auth, projectsRoot }) => {
 		const answered = await session(request, server);
 		if (answered) return answered;
 
-		if (!auth.isLoggedIn(request)) return Response.json({ error: 'Log in first' }, { status: 401 });
+		if (!auth.isLoggedIn(request, server)) return Response.json({ error: 'Log in first' }, { status: 401 });
 
 		return (await api(request)) ?? Response.json({ error: 'Not found' }, { status: 404 });
 	};

@@ -61,13 +61,14 @@ const makeGame = async (name, { scaffold = false, scripts = {} } = {}) => {
 	return dir;
 };
 
-const setup = ({ run = async () => ({ code: 0, output: '' }), exposure = {} } = {}) => {
+const setup = ({ run = async () => ({ code: 0, output: '' }), exposure = {}, shots = null } = {}) => {
 	const units = fakeUnits();
 	const hub = createHub({
 		db: fakeDb(),
 		units,
 		run,
 		probe: async () => ({ ok: true }),
+		shots,
 		hubDir: '/hub',
 		resetsDir: path.join(root, 'resets'),
 		exposure: {
@@ -430,4 +431,58 @@ test('a cover chosen here outranks the README, and changing it leaves the name f
 
 	await writeFile(path.join(dir, 'client/manifest.json'), JSON.stringify({ name: 'Driller 2' }));
 	expect((await hub.get(id)).name).toBe('Driller 2');
+});
+
+describe('live pictures', () => {
+	// A camera that writes an empty png where the real one would, and remembers what it was pointed at
+	const fakeShots = () => {
+		const taken = [];
+
+		return {
+			taken,
+			available: true,
+			file: id => (taken.includes(id) ? path.join(root, `${id}.png`) : null),
+			take: async (id, url) => {
+				await writeFile(path.join(root, `${id}.png`), '');
+				taken.push(id);
+
+				return url.endsWith(':1040/');
+			},
+			forget: async () => {},
+		};
+	};
+
+	test("a game is pictured once it's started and answering", async () => {
+		const shots = fakeShots();
+		const { hub } = setup({ shots });
+		const { id } = await hub.add({ dir: await makeGame('app', { scripts: { 'service:enable': 'x --port 1040' } }) });
+
+		await hub.turnOn(id).done;
+		await Bun.sleep(10);
+
+		expect(shots.taken).toEqual(['app']);
+	});
+
+	test('a game whose README shows nothing gets its live picture as its cover', async () => {
+		const shots = fakeShots();
+		const { hub } = setup({ shots });
+		const { id } = await hub.add({ dir: await makeGame('app') });
+
+		expect((await hub.get(id)).about.cover).toBe(null);
+
+		await hub.turnOn(id).done;
+		await Bun.sleep(10);
+
+		expect((await hub.get(id)).about.cover).toMatchObject({
+			path: 'live',
+			url: expect.stringContaining('/api/games/app/shot?v='),
+		});
+	});
+
+	test("a game that's off isn't pictured on request, and saying so is the answer", async () => {
+		const { hub } = setup({ shots: fakeShots() });
+		const { id } = await hub.add({ dir: await makeGame('app') });
+
+		await expect(hub.photograph(id)).rejects.toThrow('App is off');
+	});
 });

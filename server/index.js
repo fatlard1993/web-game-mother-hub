@@ -10,6 +10,7 @@ import { createAuth } from './auth';
 import { createHub } from './hub';
 import { createRouter } from './router';
 import { run } from './run';
+import { createShots } from './shots';
 import { createUnits } from './units';
 
 handleExit();
@@ -46,7 +47,11 @@ const { options } = new Argi({
 
 const db = await openDatabase({ path: options.database, defaults: { games: {} } });
 
-const auth = await createAuth({ db, password: options.password || process.env.MOTHER_HUB_PASSWORD });
+const auth = await createAuth({
+	db,
+	password: options.password || process.env.MOTHER_HUB_PASSWORD,
+	tokenFile: path.join(path.dirname(db.path), '.web-game-mother-hub-token'),
+});
 
 const probe = async (url, timeout) => {
 	try {
@@ -64,6 +69,7 @@ const hub = createHub({
 	units: createUnits({ run }),
 	run,
 	probe,
+	shots: createShots({ dir: path.join(path.dirname(db.path), '.web-game-mother-hub-shots'), run }),
 	hubDir: path.resolve(import.meta.dir, '..'),
 	resetsDir: path.join(path.dirname(db.path), '.web-game-mother-hub-resets'),
 	exposure: {

@@ -1,4 +1,4 @@
-import { existsSync } from 'fs';
+import { existsSync, statSync } from 'fs';
 import { mkdir, rename } from 'fs/promises';
 import path from 'path';
 
@@ -15,6 +15,12 @@ const ASSIGNED_PORTS = [4100, 4199];
 const GIT_CACHE_MS = 30_000;
 const HEALTH_TIMEOUT_MS = 1500;
 const OPERATION_LINES = 400;
+// What leaves a game freshly started, and so worth a new picture of
+const FRESH_STARTS = ['turn on', 'restart', 'update', 'reset'];
+// How long a started game is given to answer before its picture is given up on
+const START_WAIT_MS = 30_000;
+// The live picture's path among a game's pictures, for choosing it as the cover
+export const LIVE = 'live';
 // What web-game-framework's Server answers with its status (its STATUS_PATH)
 const STATUS_PATH = '/.well-known/web-game';
 
@@ -29,7 +35,18 @@ class NotFoundError extends Error {
 // What the hub does to games: keeps the list, starts and stops them, updates, resets and exposes them, and says how
 // each one is doing. Everything it touches outside its database goes through units (systemd), run (commands) and
 // probe (HTTP), so tests hand it fakes.
-export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, now = () => new Date() }) => {
+export const createHub = ({
+	db,
+	units,
+	run,
+	probe,
+	shots = null,
+	hubDir,
+	resetsDir,
+	exposure,
+	now = () => new Date(),
+	startWaitMs = START_WAIT_MS,
+}) => {
 	const games = () => db.data.games;
 	const operations = new Map();
 	const gitCache = new Map();
@@ -97,6 +114,7 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 			try {
 				await work(record, log);
 				operation.ok = true;
+				if (FRESH_STARTS.includes(kind)) photograph(record);
 			} catch (error) {
 				operation.ok = false;
 				operation.error = error.message;
@@ -135,7 +153,8 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 		const [branch, last, status, behind] = await Promise.all([
 			git('rev-parse', '--abbrev-ref', 'HEAD'),
 			git('log', '-1', '--format=%h%x09%cr%x09%s'),
-			git('status', '--porcelain'),
+			// Edits to what the repo tracks, which is what stands in a pull's way; builds and installs leave the rest
+			git('status', '--porcelain', '--untracked-files=no'),
 			git('rev-list', '--count', 'HEAD..@{u}'),
 		]);
 
@@ -148,6 +167,47 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 
 		return info;
 	};
+
+	const photographing = new Set();
+
+	// A picture of the game as it is now, once it answers; a game that never does, or no Chrome, means no picture
+	const photograph = async record => {
+		if (!shots?.available || photographing.has(record.id)) return false;
+
+		photographing.add(record.id);
+
+		try {
+			const url = `http://127.0.0.1:${record.port}/`;
+			const until = Date.now() + startWaitMs;
+
+			while (!(await probe(url, HEALTH_TIMEOUT_MS)).ok) {
+				if (Date.now() > until || !(await units.state(record.id)).active) return false;
+				await Bun.sleep(1000);
+			}
+
+			return await shots.take(record.id, url);
+		} finally {
+			photographing.delete(record.id);
+		}
+	};
+
+	const livePicture = record => {
+		const file = shots?.file(record.id);
+
+		if (!file) return null;
+
+		const taken = statSync(file).mtime;
+
+		return {
+			file,
+			path: LIVE,
+			url: `/api/games/${encodeURIComponent(record.id)}/shot?v=${taken.getTime()}`,
+			alt: `As it was when it last started, ${taken.toLocaleString('en-US', { dateStyle: 'medium', timeStyle: 'short' })}`,
+		};
+	};
+
+	// The README's pictures, then the live one
+	const pictures = (record, docs) => [...docs.media, livePicture(record)].filter(Boolean);
 
 	const status = async record => {
 		const [unit, tunnel, answer, git, look, docs] = await Promise.all([
@@ -172,8 +232,8 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 			git,
 			about: {
 				blurb: docs.blurb,
-				cover: coverOf(docs.media, record.cover),
-				pictures: docs.media.length,
+				cover: coverOf(pictures(record, docs), record.cover),
+				pictures: pictures(record, docs).length,
 				hasReadme: !!docs.markdown,
 			},
 			look: {
@@ -216,7 +276,10 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 
 		get: async id => status(game(id)),
 
-		hub: () => ({ exposure: { ...exposure, configured: !!(exposure.sshHost && exposure.publicHost) } }),
+		hub: () => ({
+			exposure: { ...exposure, configured: !!(exposure.sshHost && exposure.publicHost) },
+			shots: !!shots?.available,
+		}),
 
 		add: async ({ dir, ...overrides }) => {
 			const detected = await detectGame(dir);
@@ -282,6 +345,7 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 
 			await units.remove(tunnelUnit(id));
 			if (record.unitOrigin === 'hub') await units.remove(id);
+			await shots?.forget(id);
 
 			delete games()[id];
 			await db.write();
@@ -400,12 +464,28 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 
 		// The README, its pictures pointed at the hub, for the game's page
 		docs: async id => {
-			const { markdown, media } = await readDocs(game(id));
+			const record = game(id);
+			const docs = await readDocs(record);
 
-			return { markdown, media: media.map(({ url, alt, path: file }) => ({ url, alt, path: file })) };
+			return {
+				markdown: docs.markdown,
+				media: pictures(record, docs).map(({ url, alt, path: file }) => ({ url, alt, path: file })),
+			};
 		},
 
 		media: async (id, index) => (await readDocs(game(id))).media[index]?.file ?? null,
+
+		shot: id => shots?.file(game(id).id) ?? null,
+
+		// A fresh picture now, of a game that's running
+		photograph: async id => {
+			const record = game(id);
+
+			if (!shots?.available) throw new ValidationError('No Chrome here to take pictures with (set CHROME)');
+			if (!(await units.state(id)).active) throw new ValidationError(`${record.name} is off`);
+
+			return photograph(record);
+		},
 
 		logs: async (id, lines) => {
 			const record = game(id);
@@ -418,15 +498,18 @@ export const createHub = ({ db, units, run, probe, hubDir, resetsDir, exposure, 
 	};
 };
 
-// The card's cover: the picture chosen for it here, or else the first of the game being played (the house READMEs
-// caption those "Play: ..."), or else the first that isn't a logo, which is square and crops badly across a card
+// The card's cover: the picture chosen for it here, or else the README's first of the game being played (the house
+// READMEs caption those "Play: ..."), or else its first that isn't a logo, which is square and crops badly across a
+// card, or else the hub's own live picture
 const coverOf = (media, chosen) => {
 	const named = item => `${item.alt} ${path.basename(item.file)}`;
+	const readme = media.filter(item => item.path !== LIVE);
 	const picture =
 		media.find(item => item.path === chosen) ??
-		media.find(item => /^play\b/i.test(item.alt)) ??
-		media.find(item => !/\b(logo|icon|banner)\b/i.test(named(item))) ??
-		media[0];
+		readme.find(item => /^play\b/i.test(item.alt)) ??
+		readme.find(item => !/\b(logo|icon|banner)\b/i.test(named(item))) ??
+		readme[0] ??
+		media.find(item => item.path === LIVE);
 
 	return picture ? { url: picture.url, alt: picture.alt, path: picture.path } : null;
 };

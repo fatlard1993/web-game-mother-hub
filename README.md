@@ -58,7 +58,22 @@ A game says how it looks and how it's doing itself; the hub only reads it.
 
 - **Its look** comes from its web manifest (`client/manifest.json`), as a browser reads it: `name` for the card's title, `theme_color` for the card's color, and the biggest of its `icons` for the tile. Failing those, the page's `<title>`, `<meta name="theme-color">` and icon link. A game with no color of its own gets a steady one made from its name. The title follows the manifest as it changes, unless the game is renamed in its settings here.
 - **What it is** comes from its README: the first paragraph of prose under the title is the card's blurb, and the pictures it shows are the card's cover and the gallery on its **About** page (the book), each captioned by its alt text, with the whole README below. The cover is the first picture captioned "Play: ..." (how the house READMEs caption gameplay), else the first that isn't a logo; any other picture can be made the cover from the gallery. Only pictures inside the game's folder are served, and links into the repo keep their words but not their target.
+- **How it looks now** is the hub's own picture: each time a game starts, restarts, updates or resets, the hub opens it in headless Chrome and keeps a picture of it, last in the gallery. A game whose README shows no pictures gets it as its cover, and **Take a picture now** on the About page takes a fresh one. Chrome is found on the PATH (`google-chrome`, `chromium`), or named by `CHROME`; without one there are no live pictures, and nothing else changes.
 - **Its numbers** come from `GET /.well-known/web-game`, which every game on [web-game-framework](https://github.com/fatlard1993/web-game-framework) answers: how many have it open right now, the games going and the players in them, and its memory. A game adds numbers of its own with the Server's `status` option, `server => [{ label: 'deepest dig', value: 42 }]`, and they show on its card as they are. A game that doesn't answer it still gets its light, from any answer on its port.
+
+## From paude's arcade
+
+A game made in paude's arcade comes here when it's shelved. Point paude's shelf at the hub's script, in `~/.config/paude/server.json`:
+
+```json
+{ "arcade": { "shelf": "bun ~/Projects/web-game-mother-hub/scripts/shelve.js {path} {port}" } }
+```
+
+Shelving clones the game out of the folder it's being built in, to `~/.web-game-mother-hub-games/<game>`, so the hub runs its own copy with its own saves while the building goes on. The clone's origin is that folder, so the game's **Update** brings in whatever was built since (and **Check for updates** says how much that is). It's added at the port paude picked, installed, built and turned on. Shelving the same game again updates it.
+
+The script reaches the hub with a token the hub keeps in `~/.web-game-mother-hub-token`, readable only by its user and honored only from this machine. `MOTHER_HUB_URL`, `MOTHER_HUB_TOKEN_FILE` and `MOTHER_HUB_GAMES` point it elsewhere.
+
+A game made with web-game-framework's `new-game` starts with its face already: its title, its description as the README's opening and in its manifest, and a color of its own. paude's arcade passes the game's title and idea, and its rules have Claude keep the README's opening saying what the game is as it grows.
 
 ## Opening a game to the internet
 

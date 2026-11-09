@@ -1,6 +1,6 @@
-import { Button, Component, Dialog, Elem, styled } from '@vanilla-bean/components';
+import { Button, Component, Dialog, Elem, Notify, styled } from '@vanilla-bean/components';
 
-import { editGame, failure, getDocs } from './api';
+import { editGame, failure, getDocs, photographGame } from './api';
 import Markdown from './Markdown';
 
 const Gallery = styled(
@@ -140,45 +140,82 @@ const Readme = styled(
 	`,
 );
 
-export const aboutDialog = async (game, onChanged) => {
+export const aboutDialog = async (game, onChanged, { canPhotograph = false } = {}) => {
 	const body = new Component({ textContent: 'Loading…' });
+	let cover = game.about.cover?.path;
 
 	body.elem.style.setProperty('--game-color', game.look.color);
+
+	const load = async () => {
+		const response = await getDocs(game.id);
+
+		if (!response.ok) {
+			body.elem.textContent = await failure(response);
+
+			return;
+		}
+
+		const { markdown, media } = await response.json();
+
+		body.elem.replaceChildren(
+			...[
+				media.length > 0 &&
+					gallery(media, {
+						cover,
+						onCover: async picture => {
+							const saved = await editGame(game.id, { cover: picture });
+
+							if (saved.ok) {
+								cover = picture;
+								onChanged?.();
+							}
+
+							return saved.ok;
+						},
+					}).elem,
+				markdown && new Readme({ md: markdown }).elem,
+			].filter(Boolean),
+		);
+
+		if (!markdown && media.length === 0) body.elem.textContent = 'No README or pictures yet.';
+	};
+
+	// A fresh picture of the game as it is right now, added to the gallery (and the card's cover, if it has no other)
+	let photographing = false;
+
+	const photograph = async () => {
+		if (photographing) return;
+
+		photographing = true;
+		new Notify({ intent: 'info', content: 'Taking a picture of it…' });
+
+		const response = await photographGame(game.id);
+		const { taken } = response.ok ? await response.json() : {};
+
+		photographing = false;
+
+		if (!taken)
+			new Notify({
+				intent: 'warning',
+				content: response.ok ? 'The game didn’t answer in time' : await failure(response),
+			});
+
+		await load();
+		onChanged?.();
+	};
 
 	new Dialog({
 		header: game.name,
 		size: 'large',
 		body,
-		buttons: ['Close'],
-		onButtonPress: ({ closeDialog }) => closeDialog(),
+		buttons: [
+			...(canPhotograph && game.unit.active
+				? [{ textContent: 'Take a picture now', icon: 'camera', variant: 'flat' }]
+				: []),
+			'Close',
+		],
+		onButtonPress: ({ button, closeDialog }) => (button === 'Close' ? closeDialog() : photograph()),
 	});
 
-	const response = await getDocs(game.id);
-
-	if (!response.ok) {
-		body.elem.textContent = await failure(response);
-
-		return;
-	}
-
-	const { markdown, media } = await response.json();
-
-	body.elem.replaceChildren(
-		...[
-			media.length > 0 &&
-				gallery(media, {
-					cover: game.about.cover?.path,
-					onCover: async picture => {
-						const saved = await editGame(game.id, { cover: picture });
-
-						if (saved.ok) onChanged?.();
-
-						return saved.ok;
-					},
-				}).elem,
-			markdown && new Readme({ md: markdown }).elem,
-		].filter(Boolean),
-	);
-
-	if (!markdown && media.length === 0) body.elem.textContent = 'This game has no README yet.';
+	await load();
 };

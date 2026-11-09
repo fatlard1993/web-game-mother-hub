@@ -51,6 +51,11 @@ const StyledCard = styled(
 			transition: transform 0.4s, filter 0.3s;
 		}
 
+		/* A live picture is the game's start screen, whose middle is where the game is */
+		.cover.live img {
+			object-position: center;
+		}
+
 		.cover:hover img {
 			transform: scale(1.03);
 		}
@@ -294,7 +299,7 @@ export default class GameCard extends StyledCard {
 			new Component({
 				appendTo: this,
 				tag: 'button',
-				addClass: 'cover',
+				addClass: ['cover', about.cover.path === 'live' && 'live'].filter(Boolean),
 				title: `About ${game.name}`,
 				onPointerPress: openAbout,
 				append: new Elem({ tag: 'img', src: about.cover.url, alt: about.cover.alt, attributes: { loading: 'lazy' } }),

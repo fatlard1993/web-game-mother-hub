@@ -28,3 +28,4 @@ export const gameAction = (id, action) => request('POST', `/api/games/${encodeUR
 export const getLogs = (id, lines = 300) => request('GET', `/api/games/${encodeURIComponent(id)}/logs?lines=${lines}`);
 export const closeAll = () => request('POST', '/api/exposure/off');
 export const getDocs = id => request('GET', `/api/games/${encodeURIComponent(id)}/docs`);
+export const photographGame = id => request('POST', `/api/games/${encodeURIComponent(id)}/shot`);
