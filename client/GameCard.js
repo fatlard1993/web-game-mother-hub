@@ -1,6 +1,6 @@
 import { Button, Card, Component, Dialog, Elem, Notify, styled } from '@vanilla-bean/components';
 
-import { failure, gameAction } from './api';
+import { editGame, failure, gameAction } from './api';
 import { capitalize, exposureState, gameState, reportChips } from './gameState';
 
 const LIGHTS = {
@@ -253,6 +253,15 @@ export default class GameCard extends StyledCard {
 		onAbout: {},
 	};
 
+	async setAutoUpdate(on) {
+		const { game, onChanged } = this.options;
+		const response = await editGame(game.id, { autoUpdate: on });
+
+		if (!response.ok) new Notify({ intent: 'danger', content: `${game.name}: ${await failure(response)}` });
+
+		onChanged?.();
+	}
+
 	async act(action, { confirm } = {}) {
 		const { game, onChanged } = this.options;
 
@@ -342,7 +351,11 @@ export default class GameCard extends StyledCard {
 
 		if (game.git) {
 			const { branch, commit, age, subject, dirty, behind } = game.git;
-			const notes = [behind > 0 && `${behind} new upstream`, dirty && 'has local changes'].filter(Boolean);
+			const notes = [
+				behind > 0 && `${behind} new upstream`,
+				dirty && 'has local changes',
+				game.updateWaiting === 'players' && 'updates once no one is playing',
+			].filter(Boolean);
 
 			new Component({
 				appendTo: body,
@@ -351,6 +364,51 @@ export default class GameCard extends StyledCard {
 				title: subject,
 			});
 		}
+
+		// Updating, by hand or by itself. A game with nothing upstream (an arcade game shelved from the folder it's built
+		// in) can still be rebuilt from what's there, but has nothing to update itself from.
+		const hasUpstream = game.git?.behind != null;
+		const behind = game.git?.behind ?? 0;
+		let updateLabel = hasUpstream ? 'Update' : 'Rebuild';
+
+		if (behind > 0) updateLabel = `Update · ${behind} new`;
+
+		new Component({
+			appendTo: body,
+			addClass: 'row',
+			append: [
+				new Button({
+					icon: 'download',
+					textContent: updateLabel,
+					variant: game.git?.behind > 0 ? undefined : 'flat',
+					intent: game.git?.behind > 0 ? 'info' : undefined,
+					tooltip: hasUpstream
+						? 'Pull, install, build, and restart if it’s running'
+						: 'Install, build, and restart if it’s running',
+					disabled: busy,
+					onPointerPress: () => this.act('update'),
+				}),
+				hasUpstream &&
+					new Button({
+						icon: game.autoUpdate ? 'toggle-on' : 'toggle-off',
+						textContent: 'Auto-update',
+						variant: 'chip',
+						intent: game.autoUpdate ? 'success' : undefined,
+						tooltip: game.autoUpdate
+							? 'Updates itself when something new lands upstream, once no one is playing'
+							: 'Turn on to have it update itself when something new lands upstream',
+						onPointerPress: () => this.setAutoUpdate(!game.autoUpdate),
+					}),
+				hasUpstream &&
+					new Button({
+						icon: 'cloud-arrow-down',
+						variant: 'flat',
+						tooltip: 'Check for updates now',
+						disabled: busy,
+						onPointerPress: () => this.act('check'),
+					}),
+			].filter(Boolean),
+		});
 
 		const exposeRow = new Component({ appendTo: body, addClass: 'row', append: [light(open.key)] });
 
@@ -439,22 +497,6 @@ export default class GameCard extends StyledCard {
 						disabled: busy,
 						onPointerPress: () => this.act('restart'),
 					}),
-				new Button({
-					icon: 'download',
-					variant: 'flat',
-					tooltip:
-						game.git?.behind > 0 ? 'Update: pull, install, build, restart' : 'Update (pull, install, build, restart)',
-					intent: game.git?.behind > 0 ? 'info' : undefined,
-					disabled: busy,
-					onPointerPress: () => this.act('update'),
-				}),
-				new Button({
-					icon: 'cloud-arrow-down',
-					variant: 'flat',
-					tooltip: 'Check for updates',
-					disabled: busy,
-					onPointerPress: () => this.act('check'),
-				}),
 				new Button({
 					icon: 'eraser',
 					variant: 'flat',

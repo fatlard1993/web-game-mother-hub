@@ -58,6 +58,8 @@ export const createHub = ({
 	// Games forgotten here, which looking through the units mustn't bring back
 	const ignored = () => (db.data.ignored ||= []);
 	const operations = new Map();
+	// Why a game meant to update itself hasn't yet, while that's so: someone's playing it
+	const updateWaiting = new Map();
 	const gitCache = new Map();
 
 	const game = id => {
@@ -244,6 +246,8 @@ export const createHub = ({
 			// Its name on the LAN (dotfiles' lan-names), else its port on this machine's
 			lanUrl: lanUrl(record.port),
 			publicUrl: record.exposed ? publicUrl(record) : null,
+			autoUpdate: !!record.autoUpdate,
+			updateWaiting: updateWaiting.get(record.id) ?? null,
 			operation: operation && { ...operation, lines: operation.lines.slice(-60) },
 		};
 	};
@@ -335,7 +339,88 @@ export const createHub = ({
 		}
 	};
 
+	// Pulls, installs and builds. Any step failing stops it there, and the running game is left alone: still the code
+	// it was started with, since it's only restarted once everything before it worked.
+	const update = id =>
+		operate(id, 'update', async (record, log) => {
+			// An arcade game shelved from the folder it's built in has nothing to pull from; what's there is built
+			const { code: tracking } = await run(['git', '-C', record.dir, 'rev-parse', '--abbrev-ref', '@{u}']);
+
+			if (tracking === 0) await step(log, ['git', 'pull', '--ff-only'], record.dir);
+			else log('No upstream to pull from; building what is here');
+
+			// Frozen, as dotfiles installs them: a plain install rewrites bun.lock when the framework drifts ahead of it,
+			// and the dirty file stops every pull after
+			const locked = ['bun.lock', 'bun.lockb'].some(file => existsSync(path.join(record.dir, file)));
+
+			await step(log, [bun, 'install', ...(locked ? ['--frozen-lockfile'] : [])], record.dir);
+			if (record.hasBuild) await step(log, [bun, 'run', 'build'], record.dir);
+
+			if ((await units.state(gameUnit(id))).active) {
+				log('Restarting');
+				await units.restart(gameUnit(id));
+			}
+
+			log('✓ Up to date');
+		});
+
+	const gitOut = async (record, ...argv) => {
+		const { code, output } = await run(['git', '-C', record.dir, ...argv]);
+
+		return code === 0 ? output.trim() : null;
+	};
+
+	// One pass over every game: each with an upstream is fetched, so its card says what's waiting, and each set to
+	// update itself does, unless someone's playing it (it waits for them to go) or the same upstream already failed
+	// to update (it waits for a new one, rather than failing on the same commit every round)
+	const autoUpdateRound = async () => {
+		for (const record of Object.values(games())) {
+			if (operations.get(record.id)?.running) continue;
+
+			const upstream =
+				(await gitOut(record, 'rev-parse', '@{u}')) && (await gitOut(record, 'fetch', '--quiet')) !== null;
+
+			if (!upstream) continue;
+
+			gitCache.delete(record.id);
+
+			const behind = Number(await gitOut(record, 'rev-list', '--count', 'HEAD..@{u}')) || 0;
+			const target = await gitOut(record, 'rev-parse', '@{u}');
+
+			if (!record.autoUpdate || behind === 0 || target === record.autoUpdateFailedAt) {
+				updateWaiting.delete(record.id);
+				continue;
+			}
+
+			const { report } = await probe(`http://127.0.0.1:${record.port}${STATUS_PATH}`, HEALTH_TIMEOUT_MS);
+
+			if (report?.connections > 0) {
+				updateWaiting.set(record.id, 'players');
+				continue;
+			}
+
+			updateWaiting.delete(record.id);
+
+			const operation = await update(record.id).done;
+
+			record.autoUpdateFailedAt = operation.ok ? null : target;
+			await db.write();
+		}
+	};
+
 	return {
+		autoUpdateRound,
+
+		// The rounds, from now on, every so often; returns what stops them
+		startAutoUpdates: everyMs => {
+			const timer = setInterval(
+				() => autoUpdateRound().catch(error => console.error('An auto-update round failed', error)),
+				everyMs,
+			);
+
+			return () => clearInterval(timer);
+		},
+
 		list: async () => {
 			await discover();
 
@@ -353,7 +438,9 @@ export const createHub = ({
 
 		edit: async (id, changes) => {
 			const record = game(id);
-			const next = { ...record, ...pick(changes, ['name', 'port', 'databases', 'cover']) };
+			const next = { ...record, ...pick(changes, ['name', 'port', 'databases', 'cover', 'autoUpdate']) };
+
+			if (typeof (next.autoUpdate ?? false) !== 'boolean') throw new ValidationError('Auto-update is on or off');
 
 			if (next.cover != null && typeof next.cover !== 'string') throw new ValidationError('A cover is a picture path');
 
@@ -413,30 +500,7 @@ export const createHub = ({
 
 		restart: id => operate(id, 'restart', () => units.restart(gameUnit(id))),
 
-		// Pulls, installs and builds. Any step failing stops it there, and the running game is left alone: still the code
-		// it was started with, since it's only restarted once everything before it worked.
-		update: id =>
-			operate(id, 'update', async (record, log) => {
-				// An arcade game shelved from the folder it's built in has nothing to pull from; what's there is built
-				const { code: tracking } = await run(['git', '-C', record.dir, 'rev-parse', '--abbrev-ref', '@{u}']);
-
-				if (tracking === 0) await step(log, ['git', 'pull', '--ff-only'], record.dir);
-				else log('No upstream to pull from; building what is here');
-
-				// Frozen, as dotfiles installs them: a plain install rewrites bun.lock when the framework drifts ahead of it,
-				// and the dirty file stops every pull after
-				const locked = ['bun.lock', 'bun.lockb'].some(file => existsSync(path.join(record.dir, file)));
-
-				await step(log, [bun, 'install', ...(locked ? ['--frozen-lockfile'] : [])], record.dir);
-				if (record.hasBuild) await step(log, [bun, 'run', 'build'], record.dir);
-
-				if ((await units.state(gameUnit(id))).active) {
-					log('Restarting');
-					await units.restart(gameUnit(id));
-				}
-
-				log('✓ Up to date');
-			}),
+		update: id => update(id),
 
 		// Fetches, so the status shows how far behind its upstream the game is
 		check: id =>

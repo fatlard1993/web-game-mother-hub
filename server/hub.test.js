@@ -569,3 +569,92 @@ describe('living with dotfiles', () => {
 		expect((await setup().hub.add({ dir })).databases).toEqual([]);
 	});
 });
+
+describe('updating by itself', () => {
+	// A git with commits waiting upstream at `target`, and an update that ends as `pullOk` says
+	const gitWaiting = ({ behind = 2, target = 'abc123', pullOk = true } = {}) => {
+		const ran = [];
+		const run = async argv => {
+			ran.push(argv.join(' '));
+			if (argv.includes('rev-list')) return { code: 0, output: String(behind) };
+			if (argv.at(-1) === '@{u}' && argv.includes('rev-parse')) return { code: 0, output: target };
+			if (argv[1] === 'pull') return { code: pullOk ? 0 : 1, output: '' };
+
+			return { code: 0, output: '' };
+		};
+
+		return { ran, run };
+	};
+
+	const pulls = ran => ran.filter(command => command === 'git pull --ff-only').length;
+
+	test('every game is fetched each round, and only one set to update itself is updated', async () => {
+		const { ran, run } = gitWaiting();
+		const { hub } = setup({ run });
+		const manual = await hub.add({ dir: await makeGame('manual') });
+		const auto = await hub.add({ dir: await makeGame('auto', { scripts: { 'service:enable': 'x --port 1040' } }) });
+
+		await hub.edit(auto.id, { autoUpdate: true });
+		await hub.autoUpdateRound();
+
+		expect(ran.filter(command => command.endsWith('fetch --quiet'))).toHaveLength(2);
+		expect(pulls(ran)).toBe(1);
+		expect((await hub.get(auto.id)).operation).toMatchObject({ kind: 'update', ok: true });
+		expect((await hub.get(manual.id)).operation).toBeUndefined();
+	});
+
+	test("someone playing holds the update until they've gone, and the card says why", async () => {
+		const { ran, run } = gitWaiting();
+		const units = fakeUnits();
+		let connections = 1;
+		const hub = createHub({
+			db: fakeDb(),
+			units,
+			run,
+			probe: async () => ({ ok: true, report: { connections } }),
+			projectsRoot: root,
+			resetsDir: path.join(root, 'resets'),
+			exposure: {},
+			bun: 'bun',
+		});
+		const { id } = await hub.add({ dir: await makeGame('busy') });
+
+		await hub.edit(id, { autoUpdate: true });
+		await hub.autoUpdateRound();
+
+		expect(pulls(ran)).toBe(0);
+		expect((await hub.get(id)).updateWaiting).toBe('players');
+
+		connections = 0;
+		await hub.autoUpdateRound();
+
+		expect(pulls(ran)).toBe(1);
+		expect((await hub.get(id)).updateWaiting).toBe(null);
+	});
+
+	test('an upstream that failed to update is left until a new one lands', async () => {
+		const git = gitWaiting({ pullOk: false });
+		const { hub } = setup({ run: git.run });
+		const { id } = await hub.add({ dir: await makeGame('broken') });
+
+		await hub.edit(id, { autoUpdate: true });
+		await hub.autoUpdateRound();
+		await hub.autoUpdateRound();
+
+		expect(pulls(git.ran)).toBe(1);
+	});
+
+	test('a game with nothing upstream is never fetched or updated', async () => {
+		const ran = [];
+		const { hub } = setup({
+			run: async argv => (ran.push(argv.join(' ')), { code: argv.includes('@{u}') ? 128 : 0, output: '' }),
+		});
+		const { id } = await hub.add({ dir: await makeGame('local') });
+
+		await hub.edit(id, { autoUpdate: true });
+		await hub.autoUpdateRound();
+
+		expect(ran.some(command => command.includes('fetch'))).toBe(false);
+		expect(pulls(ran)).toBe(0);
+	});
+});

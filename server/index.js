@@ -61,6 +61,11 @@ const { options } = new Argi({
 			defaultValue: 19100,
 			description: "Tunnels listen on the VPS's loopback at the ports after this",
 		},
+		'update-minutes': {
+			type: 'number',
+			defaultValue: Number(env.MOTHER_HUB_UPDATE_MINUTES) || 15,
+			description: 'How often every game is checked upstream, and those set to update themselves are updated',
+		},
 		slots: { type: 'number', defaultValue: 8, description: 'How many games can be exposed at once' },
 	},
 });
@@ -130,5 +135,9 @@ const hub = createHub({
 });
 
 await serve({ port: options.port, router: createRouter({ hub, auth, projectsRoot: options.projects }) });
+
+// The first round a minute after starting, not in the same breath as a restart, and then every so often
+setTimeout(() => hub.autoUpdateRound().catch(error => console.error('An auto-update round failed', error)), 60_000);
+hub.startAutoUpdates(options['update-minutes'] * 60_000);
 
 devConsole();
