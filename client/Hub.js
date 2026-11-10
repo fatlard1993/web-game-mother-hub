@@ -84,8 +84,8 @@ export default class Hub extends Component {
 		this.grid = new Grid();
 		this.empty = new EmptyState({
 			icon: 'gamepad',
-			heading: 'No games yet',
-			body: admin
+			title: 'No games yet',
+			message: admin
 				? 'Add one from its folder, and it can be turned on, updated, reset and shared from here.'
 				: 'There are no games here yet.',
 			style: { display: 'none' },
@@ -93,8 +93,8 @@ export default class Hub extends Component {
 
 		this.offline = new EmptyState({
 			icon: 'plug-circle-xmark',
-			heading: "Can't reach the hub right now",
-			body: 'The games may still be running. This page tries again every few seconds.',
+			title: "Can't reach the hub right now",
+			message: 'The games may still be running. This page tries again every few seconds.',
 			style: { display: 'none' },
 		});
 
