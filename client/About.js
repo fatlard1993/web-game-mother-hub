@@ -178,7 +178,7 @@ export const aboutDialog = async (game, onChanged, { canPhotograph = false, canC
 								if (saved.ok) {
 									cover = picture;
 									onChanged?.();
-								}
+								} else new Notify({ intent: 'danger', content: `Couldn't make it the cover: ${await failure(saved)}` });
 
 								return saved.ok;
 							}),
@@ -197,40 +197,44 @@ export const aboutDialog = async (game, onChanged, { canPhotograph = false, canC
 			);
 	};
 
-	// A fresh picture of the game as it is right now, added to the gallery (and the card's cover, if it has no other)
+	// A fresh picture of the game as it is right now, added to the gallery (and the card's cover, if it has no other);
+	// its button is disabled while it's taken
 	let photographing = false;
+
+	const buttons = () => [
+		...(canPhotograph && game.unit.active
+			? [{ textContent: 'Take a picture now', icon: 'camera', variant: 'flat', disabled: photographing }]
+			: []),
+		'Close',
+	];
 
 	const photograph = async () => {
 		if (photographing) return;
 
 		photographing = true;
-		new Notify({ intent: 'info', content: 'Taking a picture of it…' });
+		dialog.options.buttons = buttons();
 
 		const response = await photographGame(game.id);
 		const { taken } = response.ok ? await response.json() : {};
 
 		photographing = false;
+		dialog.options.buttons = buttons();
 
 		if (!taken)
 			new Notify({
-				intent: 'warning',
-				content: response.ok ? 'The game didn’t answer in time' : await failure(response),
+				intent: response.ok ? 'warning' : 'danger',
+				content: response.ok ? 'The game didn’t answer in time' : `Couldn't take a picture: ${await failure(response)}`,
 			});
 
 		await load();
 		onChanged?.();
 	};
 
-	new Dialog({
+	const dialog = new Dialog({
 		header: game.name,
 		size: 'large',
 		body,
-		buttons: [
-			...(canPhotograph && game.unit.active
-				? [{ textContent: 'Take a picture now', icon: 'camera', variant: 'flat' }]
-				: []),
-			'Close',
-		],
+		buttons: buttons(),
 		onButtonPress: ({ button, closeDialog }) => (button === 'Close' ? closeDialog() : photograph()),
 	});
 
