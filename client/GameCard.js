@@ -381,7 +381,7 @@ export default class GameCard extends StyledCard {
 							onPointerPress: () => copyAddress(game.publicUrl),
 						}),
 					(about.hasReadme || about.pictures > 0) &&
-						new Button({ icon: 'book-open', variant: 'flat', textContent: 'About', onPointerPress: openAbout }),
+						new Button({ icon: 'book-open', variant: 'flat', textContent: 'Read about it', onPointerPress: openAbout }),
 				].filter(Boolean),
 			});
 

@@ -77,7 +77,7 @@ export default class Hub extends Component {
 						new Button({
 							icon: 'lock',
 							variant: 'flat',
-							textContent: 'Admin',
+							textContent: 'Log in',
 							tooltip: 'Log in to turn games on and off, update, reset and share them',
 							onPointerPress: () => loginDialog(() => onSessionChanged?.()),
 						}),
