@@ -1,4 +1,4 @@
-import { Button, Card, Component, Dialog, Elem, Notify, styled } from '@vanilla-bean/components';
+import { Button, Card, Component, Dialog, Elem, Link, Notify, styled } from '@vanilla-bean/components';
 
 import { editGame, failure, gameAction } from './api';
 import { capitalize, exposureState, gameState, reportChips } from './gameState';
@@ -367,12 +367,7 @@ export default class GameCard extends StyledCard {
 				addClass: 'row',
 				append: [
 					game.unit.active &&
-						new Button({
-							icon: 'play',
-							textContent: 'Play',
-							intent: 'success',
-							onPointerPress: () => window.open(lanUrl, '_blank'),
-						}),
+						new Link({ href: lanUrl, target: '_blank', variant: 'button', icon: 'play', textContent: 'Play' }),
 					// Only while it really is open: a failing tunnel's address only says the game isn't open
 					open.key === 'open' &&
 						game.publicUrl &&
