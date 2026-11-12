@@ -1,4 +1,4 @@
-import { Button, Component, Dialog, Elem, Notify, styled } from '@vanilla-bean/components';
+import { Button, Component, Dialog, Elem, EmptyState, Notify, styled } from '@vanilla-bean/components';
 
 import { editGame, failure, getDocs, photographGame } from './api';
 import Markdown from './Markdown';
@@ -142,7 +142,7 @@ const Readme = styled(
 );
 
 export const aboutDialog = async (game, onChanged, { canPhotograph = false, canChooseCover = false } = {}) => {
-	const body = new Component({ textContent: 'Loading…' });
+	const body = new Component({ append: new EmptyState({ loading: true }) });
 	let cover = game.about.cover?.path;
 
 	body.elem.style.setProperty('--game-color', game.look.color);
@@ -151,7 +151,14 @@ export const aboutDialog = async (game, onChanged, { canPhotograph = false, canC
 		const response = await getDocs(game.id);
 
 		if (!response.ok) {
-			body.elem.textContent = await failure(response);
+			body.elem.replaceChildren(
+				new EmptyState({
+					icon: 'triangle-exclamation',
+					title: "Couldn't load its README and pictures",
+					message: await failure(response),
+					action: { textContent: 'Try again', onPointerPress: load },
+				}).elem,
+			);
 
 			return;
 		}
@@ -180,7 +187,14 @@ export const aboutDialog = async (game, onChanged, { canPhotograph = false, canC
 			].filter(Boolean),
 		);
 
-		if (!markdown && media.length === 0) body.elem.textContent = 'No README or pictures yet.';
+		if (!markdown && media.length === 0)
+			body.elem.replaceChildren(
+				new EmptyState({
+					icon: 'book-open',
+					title: 'No README or pictures yet',
+					message: 'A README in its folder shows here, with the pictures it shows.',
+				}).elem,
+			);
 	};
 
 	// A fresh picture of the game as it is right now, added to the gallery (and the card's cover, if it has no other)

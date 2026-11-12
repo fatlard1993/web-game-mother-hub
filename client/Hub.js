@@ -92,13 +92,17 @@ export default class Hub extends Component {
 		});
 
 		this.offline = new EmptyState({
-			icon: 'plug-circle-xmark',
+			icon: 'triangle-exclamation',
 			title: "Can't reach the hub right now",
 			message: 'The games may still be running. This page tries again every few seconds.',
+			action: { textContent: 'Try again', onPointerPress: () => this.refresh() },
 			style: { display: 'none' },
 		});
 
-		new Content({ appendTo: this, column: 1200, append: [this.offline, this.empty, this.grid] });
+		// Until the first poll answers
+		this.loading = new EmptyState({ loading: true });
+
+		new Content({ appendTo: this, column: 1200, append: [this.loading, this.offline, this.empty, this.grid] });
 
 		Object.assign(this.elem.style, { display: 'flex', flexDirection: 'column', height: '100%' });
 
@@ -138,6 +142,7 @@ export default class Hub extends Component {
 			// The hub restarting, or the network gone: said below, and the next poll finds it again
 		}
 
+		this.loading.elem.style.display = 'none';
 		this.offline.elem.style.display = games ? 'none' : '';
 		this.grid.elem.classList.toggle('stale', !games);
 		if (games) this.show(games);

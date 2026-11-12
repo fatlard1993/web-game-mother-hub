@@ -1,4 +1,4 @@
-import { Button, Component, Dialog, Elem, FormDialog, Notify, styled } from '@vanilla-bean/components';
+import { Button, Component, Dialog, Elem, EmptyState, FormDialog, Notify, styled } from '@vanilla-bean/components';
 
 import { addGame, editGame, failure, forgetGame, getCandidates, getLogs, logIn } from './api';
 
@@ -69,21 +69,39 @@ const Log = styled(
 );
 
 export const logsDialog = async game => {
-	const log = new Log({ tag: 'pre', textContent: 'Loading…' });
+	const log = new Log({ tag: 'pre', style: { display: 'none' } });
+	// Loading, failed or empty in place of the log; nothing while there's a log to show
+	const status = new Component({ append: new EmptyState({ loading: true }) });
 
 	const load = async () => {
 		const response = await getLogs(game.id);
+		const logs = response.ok ? (await response.json()).logs : null;
 
-		log.options.textContent = response.ok
-			? (await response.json()).logs || 'Nothing logged yet'
-			: await failure(response);
+		log.options.textContent = logs ?? '';
+		log.elem.style.display = logs ? '' : 'none';
+		status.elem.replaceChildren();
+
+		if (!logs)
+			status.elem.append(
+				new EmptyState(
+					response.ok
+						? { icon: 'scroll', title: 'Nothing logged yet', message: 'What it writes as it runs shows here.' }
+						: {
+								icon: 'triangle-exclamation',
+								title: "Couldn't load its logs",
+								message: await failure(response),
+								action: { textContent: 'Try again', onPointerPress: load },
+							},
+				).elem,
+			);
+
 		log.elem.parentElement?.scrollTo({ top: log.elem.scrollHeight });
 	};
 
 	new Dialog({
 		header: `${game.name}: logs`,
 		size: 'large',
-		body: log,
+		body: [status, log],
 		buttons: ['Refresh', 'Close'],
 		onButtonPress: ({ button, closeDialog }) => (button === 'Refresh' ? load() : closeDialog()),
 	});
