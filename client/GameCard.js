@@ -37,6 +37,7 @@ const StyledCard = styled(
 			display: block;
 			padding: 0;
 			border: none;
+			border-radius: 0;
 			cursor: pointer;
 			aspect-ratio: 21 / 9;
 			overflow: hidden;
@@ -317,9 +318,8 @@ export default class GameCard extends StyledCard {
 		const openAbout = () => this.options.onAbout?.(game);
 
 		if (about.cover) {
-			new Component({
+			new Button({
 				appendTo: this,
-				tag: 'button',
 				addClass: ['cover', about.cover.path === 'live' && 'live'].filter(Boolean),
 				title: `About ${game.name}`,
 				onPointerPress: openAbout,
