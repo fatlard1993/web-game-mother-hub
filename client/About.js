@@ -61,7 +61,7 @@ const Gallery = styled(
 			opacity: 0.6;
 		}
 
-		.thumbs button.current {
+		.thumbs button[aria-pressed='true'] {
 			border-color: var(--game-color);
 			opacity: 1;
 		}
@@ -100,11 +100,11 @@ const gallery = (media, { cover, onCover }) => {
 		stage.elem.replaceChildren(new Elem({ tag: 'img', src: media[current].url, alt: media[current].alt }).elem);
 		captionText.elem.textContent = media[current].alt;
 		coverButton.elem.style.display = !onCover || media[current].path === cover ? 'none' : '';
-		[...thumbs.elem.children].forEach((thumb, at) => thumb.classList.toggle('current', at === current));
-		thumbs.elem.children[current]?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+		thumbButtons.forEach((thumb, at) => (thumb.options.pressed = at === current));
+		thumbButtons[current]?.elem.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 	};
 
-	media.forEach(
+	const thumbButtons = media.map(
 		(item, index) =>
 			new Button({
 				appendTo: thumbs,

@@ -434,10 +434,9 @@ export default class GameCard extends StyledCard {
 				}),
 				hasUpstream &&
 					new Button({
-						icon: game.autoUpdate ? 'toggle-on' : 'toggle-off',
 						textContent: 'Auto-update',
 						variant: 'chip',
-						intent: game.autoUpdate ? 'success' : undefined,
+						pressed: !!game.autoUpdate,
 						tooltip: game.autoUpdate
 							? 'Updates itself each night when something new has landed upstream, once no one is playing'
 							: 'Turn on to have it update itself each night when something new has landed upstream',
