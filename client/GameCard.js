@@ -19,7 +19,7 @@ const LIGHTS = {
 
 const StyledCard = styled(
 	Card,
-	({ colors, space }) => `
+	({ colors, fontSize, radius, space }) => `
 		/* --game-color is set per card, from the game's own manifest */
 		display: flex;
 		flex-direction: column;
@@ -68,7 +68,7 @@ const StyledCard = styled(
 		.blurb {
 			margin: 0;
 			color: ${colors.muted};
-			font-size: 0.9em;
+			font-size: ${fontSize.sm};
 			line-height: 1.4;
 			display: -webkit-box;
 			-webkit-line-clamp: 3;
@@ -108,7 +108,7 @@ const StyledCard = styled(
 		}
 
 		.title .name strong {
-			font-size: 1.15em;
+			font-size: ${fontSize.lg};
 			overflow: hidden;
 			text-overflow: ellipsis;
 			white-space: nowrap;
@@ -117,7 +117,7 @@ const StyledCard = styled(
 		.title a {
 			margin-left: auto;
 			align-self: flex-start;
-			font-size: 0.85em;
+			font-size: ${fontSize.sm};
 		}
 
 		.tile {
@@ -128,10 +128,10 @@ const StyledCard = styled(
 			justify-content: center;
 			width: 52px;
 			height: 52px;
-			border-radius: 12px;
+			border-radius: ${radius.lg};
 			background: var(--game-color);
 			box-shadow: 0 2px 10px color-mix(in srgb, var(--game-color) 45%, transparent);
-			font-size: 1.6em;
+			font-size: ${fontSize.xxl};
 			font-weight: bold;
 			color: ${colors.white};
 			text-shadow: 0 1px 2px ${colors.alpha(colors.vantablack, 0.6)};
@@ -171,7 +171,7 @@ const StyledCard = styled(
 			padding: 2px 8px;
 			border-radius: 999px;
 			background: ${colors.alpha(colors.white, 0.06)};
-			font-size: 0.85em;
+			font-size: ${fontSize.sm};
 		}
 
 		.chip b {
@@ -204,7 +204,7 @@ const StyledCard = styled(
 
 		.muted {
 			color: ${colors.muted};
-			font-size: 0.85em;
+			font-size: ${fontSize.sm};
 		}
 
 		.light {
@@ -224,7 +224,7 @@ const StyledCard = styled(
 			margin: 0;
 			max-height: 10em;
 			overflow: auto;
-			font-size: 0.75em;
+			font-size: ${fontSize.xs};
 			white-space: pre-wrap;
 			background: ${colors.alpha(colors.vantablack, 0.3)};
 			padding: ${space.xs};

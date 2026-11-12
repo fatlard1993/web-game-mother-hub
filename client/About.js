@@ -5,7 +5,7 @@ import Markdown from './Markdown';
 
 const Gallery = styled(
 	Component,
-	({ colors, space }) => `
+	({ colors, fontSize, radius, space }) => `
 		display: flex;
 		flex-direction: column;
 		gap: ${space.sm};
@@ -17,7 +17,7 @@ const Gallery = styled(
 			justify-content: center;
 			height: min(55vh, 520px);
 			background: ${colors.alpha(colors.vantablack, 0.45)};
-			border-radius: 8px;
+			border-radius: ${radius.lg};
 			border-top: 3px solid var(--game-color);
 			overflow: hidden;
 		}
@@ -33,7 +33,7 @@ const Gallery = styled(
 			align-items: center;
 			gap: ${space.sm};
 			color: ${colors.muted};
-			font-size: 0.9em;
+			font-size: ${fontSize.sm};
 			min-height: 2em;
 		}
 
@@ -54,7 +54,7 @@ const Gallery = styled(
 			height: 60px;
 			padding: 0;
 			border: 2px solid transparent;
-			border-radius: 6px;
+			border-radius: ${radius.md};
 			overflow: hidden;
 			cursor: pointer;
 			background: ${colors.alpha(colors.vantablack, 0.45)};

@@ -58,10 +58,10 @@ export const settingsDialog = (game, onChanged) =>
 
 const Log = styled(
 	Component,
-	({ colors, space }) => `
+	({ colors, fontSize, space }) => `
 		margin: 0;
 		white-space: pre-wrap;
-		font-size: 0.75em;
+		font-size: ${fontSize.xs};
 		background: ${colors.alpha(colors.vantablack, 0.3)};
 		padding: ${space.sm};
 		min-height: 100%;
@@ -109,12 +109,15 @@ export const logsDialog = async game => {
 	await load();
 };
 
-const Candidates = styled.Component`
-	display: flex;
-	flex-wrap: wrap;
-	gap: 6px;
-	margin-bottom: 12px;
-`;
+const Candidates = styled(
+	Component,
+	({ space }) => `
+		display: flex;
+		flex-wrap: wrap;
+		gap: ${space.sm};
+		margin-bottom: ${space.md};
+	`,
+);
 
 export const addDialog = async onChanged => {
 	const response = await getCandidates();

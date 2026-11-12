@@ -9,17 +9,20 @@ const POLL_MS = 3000;
 // Quicker while something is under way, so its output reads as it comes
 const BUSY_POLL_MS = 1000;
 
-const Grid = styled.Component`
-	&.stale {
-		opacity: 0.45;
-		filter: grayscale(0.7);
-	}
+const Grid = styled(
+	Component,
+	({ space }) => `
+		&.stale {
+			opacity: 0.45;
+			filter: grayscale(0.7);
+		}
 
-	display: grid;
-	grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
-	gap: 12px;
-	padding: 12px 0;
-`;
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+		gap: ${space.md};
+		padding: ${space.md} 0;
+	`,
+);
 
 export default class Hub extends Component {
 	static schema = { admin: {}, onSessionChanged: {} };
