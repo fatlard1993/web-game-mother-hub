@@ -202,10 +202,10 @@ export const aboutDialog = async (game, onChanged, { canPhotograph = false, canC
 	let photographing = false;
 
 	const buttons = () => [
+		'Close',
 		...(canPhotograph && game.unit.active
 			? [{ textContent: 'Take a picture now', icon: 'camera', variant: 'flat', disabled: photographing }]
 			: []),
-		'Close',
 	];
 
 	const photograph = async () => {

@@ -102,7 +102,7 @@ export const logsDialog = async game => {
 		header: `${game.name}: logs`,
 		size: 'large',
 		body: [status, log],
-		buttons: ['Refresh', 'Close'],
+		buttons: ['Close', 'Refresh'],
 		onButtonPress: ({ button, closeDialog }) => (button === 'Refresh' ? load() : closeDialog()),
 	});
 
