@@ -471,7 +471,8 @@ export default class GameCard extends StyledCard {
 		if (exposure.configured) {
 			new Button({
 				appendTo: exposeRow,
-				variant: 'chip',
+				variant: 'flat',
+				size: 'small',
 				disabled: busy,
 				textContent: game.exposed ? 'Close' : 'Open to the internet',
 				onPointerPress: () =>

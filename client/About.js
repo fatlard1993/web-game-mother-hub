@@ -82,7 +82,8 @@ const gallery = (media, { cover, onCover }) => {
 	const captionText = new Elem({ tag: 'span' });
 	const coverButton = new Button({
 		icon: 'image',
-		variant: 'chip',
+		variant: 'flat',
+		size: 'small',
 		textContent: 'Use as the card’s cover',
 		onPointerPress: async () => {
 			if (await onCover(media[current].path)) {

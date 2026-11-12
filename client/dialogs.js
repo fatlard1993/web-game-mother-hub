@@ -124,7 +124,8 @@ export const addDialog = async onChanged => {
 							append: candidates.map(
 								candidate =>
 									new Button({
-										variant: 'chip',
+										variant: 'flat',
+										size: 'small',
 										textContent: candidate.name,
 										tooltip: candidate.dir,
 										// Saved as if typed, so a failure shows in the form's own line
