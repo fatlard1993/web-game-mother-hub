@@ -127,11 +127,10 @@ export const addDialog = async onChanged => {
 										variant: 'chip',
 										textContent: candidate.name,
 										tooltip: candidate.dir,
-										onPointerPress: async () => {
-											const added = await add({ dir: candidate.dir });
-
-											if (added.ok) dialog.close();
-											else new Notify({ intent: 'danger', content: await failure(added) });
+										// Saved as if typed, so a failure shows in the form's own line
+										onPointerPress: () => {
+											dialog.form.options.data.dir = candidate.dir;
+											dialog.save();
 										},
 									}),
 							),
