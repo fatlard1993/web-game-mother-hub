@@ -29,7 +29,7 @@
 		"deploy": "bun run build && systemctl --user restart bun-server@web-game-mother-hub"
 	},
 	"dependencies": {
-		"@vanilla-bean/components": "^7.2.3",
+		"@vanilla-bean/components": "^7.3.0",
 		"argi-cli": "^1.0.0",
 		"lowdb": "^7.0.1",
 		"marked": "^18.0.6"
