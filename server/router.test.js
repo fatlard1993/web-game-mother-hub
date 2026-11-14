@@ -192,7 +192,8 @@ describe('logging in', () => {
 
 		expect(third - admin).toBeGreaterThan(500);
 		expect(third - stranger).toBeGreaterThan(500);
-	});
+		// Five real argon2 checks and a second of back-off: near five seconds on an idle machine
+	}, 15000);
 });
 
 test("a game's files are served sandboxed, and an id like __proto__ is just no game", async () => {
