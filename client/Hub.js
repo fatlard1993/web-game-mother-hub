@@ -144,7 +144,12 @@ export default class Hub extends Component {
 			const response = await getGames();
 
 			if (response.status === 401 && this.options.admin) {
-				new Notify({ intent: 'warning', content: 'Your admin login ran out: log in again to run the games' });
+				// The poll found it, not a press: the corner stack
+				new Notify({
+					intent: 'warning',
+					content: 'Your admin login ran out: log in again to run the games',
+					anchor: false,
+				});
 
 				return this.options.onSessionChanged?.();
 			}
