@@ -1,4 +1,14 @@
-import { Button, Component, Dialog, Elem, EmptyState, FormDialog, Notify, styled } from '@vanilla-bean/components';
+import {
+	Button,
+	Code,
+	Component,
+	Dialog,
+	Elem,
+	EmptyState,
+	FormDialog,
+	Notify,
+	styled,
+} from '@vanilla-bean/components';
 
 import { addGame, editGame, failure, forgetGame, getCandidates, getLogs, logIn } from './api';
 
@@ -33,7 +43,18 @@ export const settingsDialog = (game, onChanged) =>
 			{ key: 'databases', label: 'Save files (one per line; a reset moves these aside)', type: 'textarea' },
 		],
 		data: { name: game.name, port: game.port, databases: game.databases.join('\n') },
-		intro: `${game.dir}\nRuns ${game.entry}, its port given by ${game.portVia === 'env' ? 'PORT' : '--port'}.`,
+		intro: [
+			new Elem({ append: new Code({ code: game.dir }) }),
+			new Elem({
+				append: [
+					'Runs ',
+					new Code({ code: game.entry }),
+					', its port given by ',
+					new Code({ code: game.portVia === 'env' ? 'PORT' : '--port' }),
+					'.',
+				],
+			}),
+		],
 		onSave: async ({ name, port, databases }) => {
 			const response = await editGame(game.id, { name, port: Number(port), databases: lines(databases) });
 

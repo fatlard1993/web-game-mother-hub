@@ -1,4 +1,4 @@
-import { Button, Card, Component, Dialog, Elem, Link, Notify, styled } from '@vanilla-bean/components';
+import { Button, Card, Code, Component, Dialog, Elem, Link, Notify, styled } from '@vanilla-bean/components';
 
 import { editGame, failure, gameAction } from './api';
 import { capitalize, exposureState, gameState, reportChips } from './gameState';
@@ -560,7 +560,11 @@ export default class GameCard extends StyledCard {
 							this.act('reset', {
 								confirm: {
 									header: `Reset ${game.name}?`,
-									body: `Its saved games and players are cleared. The save files are moved, not deleted, to ~/.web-game-mother-hub-resets/${game.id}/ on the hub's machine: move them back to undo it.`,
+									body: [
+										'Its saved games and players are cleared. The save files are moved, not deleted, to ',
+										new Code({ code: `~/.web-game-mother-hub-resets/${game.id}/` }),
+										" on the hub's machine: move them back to undo it.",
+									],
 									confirmLabel: 'Reset',
 									intent: 'danger',
 								},
