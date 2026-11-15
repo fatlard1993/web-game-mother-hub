@@ -167,9 +167,9 @@ const StyledCard = styled(
 		.chip {
 			display: inline-flex;
 			align-items: baseline;
-			gap: 0.35em;
-			padding: 2px 8px;
-			border-radius: 999px;
+			gap: ${space.xs};
+			padding: ${space.xs} ${space.sm};
+			border-radius: ${radius.pill};
 			background: ${colors.alpha(colors.white, 0.06)};
 			font-size: ${fontSize.sm};
 		}
