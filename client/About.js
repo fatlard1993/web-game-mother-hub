@@ -110,7 +110,8 @@ const gallery = (media, { cover, onCover }) => {
 			new Button({
 				appendTo: thumbs,
 				variant: 'flat',
-				tooltip: item.alt || false,
+				// A picture with no words of its own is still named, by where it is in the row
+				tooltip: item.alt || `Picture ${index + 1}`,
 				onPointerPress: () => show(index),
 				append: new Elem({ tag: 'img', src: item.url, alt: '', attributes: { loading: 'lazy' } }),
 			}),
