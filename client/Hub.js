@@ -43,7 +43,11 @@ export default class Hub extends Component {
 
 				const response = await closeAll();
 
-				if (!response.ok) new Notify({ intent: 'danger', content: await failure(response) });
+				if (!response.ok)
+					new Notify({
+						intent: 'danger',
+						content: `Couldn't close everything to the internet: ${await failure(response)}`,
+					});
 
 				this.refresh();
 			},

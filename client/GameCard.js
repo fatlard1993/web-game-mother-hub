@@ -17,6 +17,18 @@ const LIGHTS = {
 	closed: null,
 };
 
+// What each of a game's actions does, said when it fails: `Couldn't ${doing(name)}: ${reason}`
+const DOING = {
+	update: name => `update ${name}`,
+	check: name => `check ${name} for updates`,
+	expose: name => `open ${name} to the internet`,
+	conceal: name => `close ${name} to the internet`,
+	turnOn: name => `turn ${name} on`,
+	turnOff: name => `turn ${name} off`,
+	restart: name => `restart ${name}`,
+	reset: name => `reset ${name}`,
+};
+
 const StyledCard = styled(
 	Card,
 	({ colors, fontSize, radius, space }) => `
@@ -268,7 +280,11 @@ export default class GameCard extends StyledCard {
 		const { game, onChanged } = this.options;
 		const response = await editGame(game.id, { autoUpdate: on });
 
-		if (!response.ok) new Notify({ intent: 'danger', content: `${game.name}: ${await failure(response)}` });
+		if (!response.ok)
+			new Notify({
+				intent: 'danger',
+				content: `Couldn't turn auto-update ${on ? 'on' : 'off'} for ${game.name}: ${await failure(response)}`,
+			});
 
 		onChanged?.();
 	}
@@ -279,8 +295,10 @@ export default class GameCard extends StyledCard {
 		if (confirm && !(await Dialog.confirm(confirm))) return;
 
 		const response = await gameAction(game.id, action);
+		const doing = DOING[action] ?? (name => `${action} ${name}`);
 
-		if (!response.ok) new Notify({ intent: 'danger', content: `${game.name}: ${await failure(response)}` });
+		if (!response.ok)
+			new Notify({ intent: 'danger', content: `Couldn't ${doing(game.name)}: ${await failure(response)}` });
 
 		onChanged?.();
 	}
