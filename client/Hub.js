@@ -68,7 +68,16 @@ export default class Hub extends Component {
 							variant: 'flat',
 							tooltip: 'Log out',
 							onPointerPress: async () => {
-								await logOut();
+								const response = await logOut().catch(error => error);
+
+								// Refused or unreachable, the session is still on: say so rather than redraw as logged out
+								if (!response?.ok) {
+									const reason = response instanceof Error ? response.message : await failure(response);
+
+									new Notify({ intent: 'danger', content: `Couldn't log out: ${reason}` });
+									return;
+								}
+
 								onSessionChanged?.();
 							},
 						}),
