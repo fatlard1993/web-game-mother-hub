@@ -8,7 +8,9 @@ import { buildClient, devConsole, handleExit, openDatabase, serve } from '@vanil
 import Argi from 'argi-cli';
 
 import { createAuth } from './auth';
+import { createCrashWatch, LEEWAYS } from './crashes';
 import { createHub } from './hub';
+import { createPaude } from './paude';
 import { createRouter } from './router';
 import { run } from './run';
 import { createShots } from './shots';
@@ -146,9 +148,11 @@ const probe = async (url, timeout) => {
 	}
 };
 
+const units = createUnits({ run, projectsRoot: path.resolve(options.projects) });
+
 const hub = createHub({
 	db,
-	units: createUnits({ run, projectsRoot: path.resolve(options.projects) }),
+	units,
 	// Where a hosted game is given its LAN name, on a machine that names them (the htpc: dotfiles' lan-names)
 	lanNames: {
 		dir: home(env.MOTHER_HUB_LAN_NAMES_DIR) || null,
@@ -179,6 +183,11 @@ const hub = createHub({
 if (!/^([01]?\d|2[0-3]):[0-5]\d$/.test(options['update-at']))
 	throw new Error('MOTHER_HUB_UPDATE_AT is HH:MM, as 04:00');
 
+// Crashes handed to Claude in paude, on a machine set up for it (the htpc); off unless asked for
+const onCrash = env.MOTHER_HUB_ON_CRASH || 'off';
+
+if (!LEEWAYS.includes(onCrash)) throw new Error(`MOTHER_HUB_ON_CRASH is ${LEEWAYS.join(', ')}, not "${onCrash}"`);
+
 await serve({
 	hostname: options.host,
 	port: options.port,
@@ -192,5 +201,20 @@ setTimeout(
 	60_000,
 );
 hub.startNightlyUpdates(options['update-at']);
+
+if (onCrash !== 'off')
+	createCrashWatch({
+		db,
+		units,
+		run,
+		busy: hub.busy,
+		leeway: onCrash,
+		paude: createPaude({
+			url: env.MOTHER_HUB_PAUDE_URL || 'http://127.0.0.1:8044',
+			token: env.MOTHER_HUB_PAUDE_TOKEN || null,
+			tokenFile: home(env.MOTHER_HUB_PAUDE_TOKEN_FILE || '~/.paude/local-token'),
+			browserUrl: env.MOTHER_HUB_PAUDE_BROWSER_URL || null,
+		}),
+	}).start();
 
 devConsole();

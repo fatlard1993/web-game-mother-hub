@@ -600,7 +600,13 @@ export const createHub = ({
 					throw new ValidationError(`${id}'s new version doesn't follow on from the one here`);
 			}
 
-			return hostFolder(id, target, { whenIdle });
+			const answer = await hostFolder(id, target, { whenIdle });
+
+			// A copy whose source is elsewhere: a crash session says what it found rather than fix it here
+			games()[id].bundled = true;
+			await db.write();
+
+			return answer;
 		},
 
 		// The night's round at `at` (HH:MM, local time) every night from now on, and again an hour later while a game
@@ -632,6 +638,8 @@ export const createHub = ({
 		},
 
 		get: async id => status(game(id)),
+
+		busy: id => !!operations.get(id)?.running,
 
 		hub: () => ({
 			exposure: { ...exposure, configured: !!(exposure.sshHost && exposure.publicHost) },

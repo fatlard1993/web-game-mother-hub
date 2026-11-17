@@ -422,6 +422,19 @@ export default class GameCard extends StyledCard {
 			});
 		}
 
+		// The Claude session the last crash went to, while it's news
+		if (game.crash && Date.now() - Date.parse(game.crash.at) < 24 * 60 * 60 * 1000) {
+			const text = `Crashed ${ago(game.crash.at)}: Claude is on it in paude`;
+
+			new Component({
+				appendTo: body,
+				addClass: ['row', 'muted'],
+				append: game.crash.url
+					? new Elem({ tag: 'a', href: game.crash.url, target: '_blank', textContent: text })
+					: new Elem({ tag: 'span', textContent: text }),
+			});
+		}
+
 		// Updating, by hand or by itself. A game with nothing upstream (an arcade game hosted from the folder it's built
 		// in) can still be rebuilt from what's there, but has nothing to update itself from.
 		const hasUpstream = game.git?.behind != null;

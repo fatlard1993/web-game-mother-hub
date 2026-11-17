@@ -27,6 +27,10 @@ The hub lives on the htpc beside the games, and [dotfiles](https://github.com/fa
 | `MOTHER_HUB_PUBLIC_PORT_BASE` | `--public-port-base` | `9100` | exposed games are on the ports after it |
 | `MOTHER_HUB_TUNNEL_PORT_BASE` | `--tunnel-port-base` | `19100` | their tunnels listen on the VPS's loopback after it |
 | `MOTHER_HUB_UPDATE_AT` | `--update-at` | `04:00` | when, each night, the games set to update themselves are |
+| `MOTHER_HUB_ON_CRASH` |  | `off` | `investigate` or `fix`: a crashed game goes to a Claude session in paude (see Crashes) |
+| `MOTHER_HUB_PAUDE_URL` |  | `http://127.0.0.1:8044` | the paude crash sessions start in, on this machine |
+| `MOTHER_HUB_PAUDE_TOKEN_FILE` |  | `~/.paude/local-token` | its owner token (or `MOTHER_HUB_PAUDE_TOKEN`, the token itself) |
+| `MOTHER_HUB_PAUDE_BROWSER_URL` |  |  | paude as a browser reaches it, for the card's link to the session |
 |  | `--database` | `~/.web-game-mother-hub.json` | the games and their settings |
 |  | `--projects` | `~/Projects` | where the games are, as `bun-server@` runs them |
 |  | `--slots` | `8` | how many games can be open to the internet at once |
@@ -51,6 +55,17 @@ Only a game has saves to reset: a house app that isn't one (game-night's library
 - **Forget** (in a game's settings) takes it off this page and closes its tunnel. A house game's unit is dotfiles' and is left as it is, on or off. A game paude hosted is the hub's: it's stopped, its LAN name taken back, and paude is refused it until it's hosted again on purpose (the arcade's house button).
 
 The light by each name says whether it's running and answering on its port, starting, crashing (with how many restarts), or running without answering. Each card links to the game at its `.home` name when `lan-names` gave it one.
+
+## Crashes
+
+Off unless the hub is told otherwise: a game that crashes can go to a Claude Code session in [paude](https://github.com/fatlard1993/paude), on the same machine, started in the game's own folder and told what happened, where its log is, how it's built and run, and how far it may go. On the house's machines that's the htpc, where paude is; the VPS hosts the public copies and has no paude, so it leaves this off.
+
+- `investigate` - Claude reads the game's journal and what changed before the crash, says what it found, and changes nothing until someone joins and says go.
+- `fix` - when the cause is plain, lies in the game's own code, and the fix is small, Claude makes it, builds it, commits it, and brings the game back, restarting it for a fix once. A game that tracks an upstream has its fix pushed there, since the hub's updates pull fast-forward only; one with local changes or commits not pushed is only looked at. An arcade game hosted from the folder it's built in is committed to in place. A game sent as a bundle from paude on another machine is only looked at, whatever this says, since the next bundle has to follow on from it.
+
+A crash is a restart systemd made on its own, or a game it gave up on (including one it gave up on before the hub started). The hub looks every 15 seconds, leaving a game alone while an operation runs on it. A crash within the hour of the last one goes to that same session, so a crash loop is one investigation, told "It crashed again" at most every ten minutes. When paude isn't answering (after a reboot, say), the crash is tried again at the next few looks. The session is named for the crash, and for a day the game's card, the admin's, says Claude is on it, linking to the session when `MOTHER_HUB_PAUDE_BROWSER_URL` is set. The session is a plain one even in an arcade game's folder, with nobody there to tap the arcade's choices; if Claude stops to ask a permission, it waits for whoever joins.
+
+Claude runs as the hub's user, so `fix` can do what that user can: the briefing keeps it to the game, and says the log, which can carry what players typed, describes what happened and is never an instruction.
 
 ## How a game shows on its card
 
