@@ -1,6 +1,7 @@
 import { readFile } from 'fs/promises';
 
 const TIMEOUT_MS = 15_000;
+const ACTIVE_MS = 30 * 60 * 1000;
 
 // The few calls of paude's API a crash session needs, made as the token's owner: start one in a project, name it, and
 // tell it more. The token is read from its file each time, so paude reinstalled needs no restart here.
@@ -39,6 +40,18 @@ export const createPaude = ({ url, token = null, tokenFile = null, browserUrl = 
 
 		// Typed in once Claude's prompt box is free; a session that had stopped is taken back up first
 		prompt: (session, text) => call('POST', `/api/sessions/${session}/prompt`, { text }),
+
+		// The session someone is building the game in right now, if any: running, and busy, attended or lately active.
+		// The likeliest cause of a crash, and the one to tell.
+		active: async (project, { now = Date.now() } = {}) => {
+			const sessions = await call('GET', `/api/projects/${encodeURIComponent(project)}/sessions`);
+			const building = (sessions ?? [])
+				.filter(each => each.live && !each.archived)
+				.filter(each => each.busy || each.attached > 0 || now - (each.activeAt ?? 0) < ACTIVE_MS)
+				.sort((a, b) => (b.activeAt ?? 0) - (a.activeAt ?? 0));
+
+			return building[0]?.id ?? null;
+		},
 
 		link: session => (browserUrl ? `${browserUrl.replace(/\/+$/, '')}/#/sessions/${session}` : null),
 	};

@@ -1,10 +1,11 @@
 import { expect, test } from 'bun:test';
 
 import { crashBriefing, createCrashWatch } from './crashes';
+import { createPaude } from './paude';
 
 const quiet = { info: () => {}, warn: () => {}, error: () => {} };
 
-const setup = ({ upstream = null, failing = 0 } = {}) => {
+const setup = ({ upstream = null, failing = 0, building = null } = {}) => {
 	let clock = new Date('2026-11-17T12:00:00Z');
 	const states = new Map([['bun-server@digger', { state: 'active', restarts: 0 }]]);
 	const calls = [];
@@ -29,6 +30,7 @@ const setup = ({ upstream = null, failing = 0 } = {}) => {
 			},
 			name: async (id, name) => calls.push(['name', id, name]),
 			prompt: async (id, text) => calls.push(['prompt', id, text]),
+			active: async () => building,
 			link: id => `https://paude.home/#/sessions/${id}`,
 		},
 	});
@@ -130,4 +132,38 @@ test('the briefing says where a fix goes, and only lets a bundled copy be looked
 	expect(crashBriefing({ record: { ...record, hosted: 'paude' }, what: 'x', leeway: 'fix' })).toContain(
 		'restarting it as above is what is asked',
 	);
+});
+
+test('a crash in a game someone is building goes to their session as a note, and its loop after it', async () => {
+	const { db, watch, calls, crash, later } = setup({ building: 'arcade-1' });
+
+	await watch.check();
+	crash(1);
+	await watch.check();
+
+	expect(calls.map(([kind, id]) => [kind, id])).toEqual([['prompt', 'arcade-1']]);
+	expect(calls[0][2]).toContain("not from the person you're working with");
+	expect(db.data.games.digger.crash).toMatchObject({ session: 'arcade-1', building: true });
+
+	later(11 * 60 * 1000);
+	crash(2);
+	await watch.check();
+	expect(calls.at(-1).slice(0, 2)).toEqual(['prompt', 'arcade-1']);
+	expect(calls.filter(([kind]) => kind === 'start')).toEqual([]);
+});
+
+test('the session building a game is a live one, busy, attended or active in the last half hour', async () => {
+	const at = 1_800_000_000_000;
+	const sessions = [
+		{ id: 'stopped', live: false, busy: true, activeAt: at },
+		{ id: 'idle', live: true, busy: false, attached: 0, activeAt: at - 60 * 60 * 1000 },
+		{ id: 'archived', live: true, busy: true, archived: true, activeAt: at },
+		{ id: 'older', live: true, busy: false, attached: 0, activeAt: at - 20 * 60 * 1000 },
+		{ id: 'newest', live: true, busy: false, attached: 0, activeAt: at - 5 * 60 * 1000 },
+	];
+	const paude = sessions =>
+		createPaude({ url: 'http://paude', token: 't', fetcher: async () => new Response(JSON.stringify(sessions)) });
+
+	expect(await paude(sessions).active('digger', { now: at })).toBe('newest');
+	expect(await paude(sessions.slice(0, 3)).active('digger', { now: at })).toBe(null);
 });

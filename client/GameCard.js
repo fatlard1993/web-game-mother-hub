@@ -424,7 +424,7 @@ export default class GameCard extends StyledCard {
 
 		// The Claude session the last crash went to, while it's news
 		if (game.crash && Date.now() - Date.parse(game.crash.at) < 24 * 60 * 60 * 1000) {
-			const text = `Crashed ${ago(game.crash.at)}: Claude is on it in paude`;
+			const text = `Crashed ${ago(game.crash.at)}: ${game.crash.building ? 'told the paude session building it' : 'Claude is on it in paude'}`;
 
 			new Component({
 				appendTo: body,
